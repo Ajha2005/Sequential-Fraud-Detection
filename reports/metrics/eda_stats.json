@@ -1,0 +1,14 @@
+{
+  "n_rows": 92621,
+  "n_cards": 3000,
+  "fraud_rate": 0.039494283153928375,
+  "missing_values": {},
+  "data_source": "synthetic",
+  "seq_len_stats": {
+    "mean": 30.873666666666665,
+    "median": 31.0,
+    "p90": 55.0,
+    "p95": 57.0,
+    "max": 60
+  }
+}

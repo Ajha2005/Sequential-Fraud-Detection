@@ -1,0 +1,43 @@
+{
+  "false_positive": {
+    "n": 74,
+    "mean_n_seen": 10.905405405405405,
+    "mean_amount": 139.93446350097656,
+    "fraction_synthetic_fault": 0.6081081081081081,
+    "quadrant_breakdown": {
+      "Edge case": 66,
+      "Fraud": 8
+    }
+  },
+  "false_negative": {
+    "n": 19,
+    "mean_n_seen": 5.526315789473684,
+    "mean_amount": 184.0594940185547,
+    "fraction_synthetic_fault": 0.0,
+    "quadrant_breakdown": {
+      "Normal": 11,
+      "Fault": 8
+    }
+  },
+  "true_positive": {
+    "n": 293,
+    "mean_n_seen": 10.283276450511945,
+    "mean_amount": 204.79925537109375,
+    "fraction_synthetic_fault": 0.0,
+    "quadrant_breakdown": {
+      "Fraud": 156,
+      "Edge case": 137
+    }
+  },
+  "true_negative": {
+    "n": 4221,
+    "mean_n_seen": 8.974176735370765,
+    "mean_amount": 34.77754592895508,
+    "fraction_synthetic_fault": 0.03695806680881308,
+    "quadrant_breakdown": {
+      "Normal": 3708,
+      "Fault": 513
+    }
+  },
+  "note": "quadrant_breakdown shows where each error group lands in the Phase 5 fault/fraud quadrant (e.g. false positives concentrated in 'Fault' would support: the model isn't wrong so much as flagging real benign anomalies that happen to share isFraud=0)."
+}

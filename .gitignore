@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Data (raw Kaggle data + large processed artifacts are not committed)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+*.csv
+*.parquet
+!reports/**/*.csv
+
+# Model checkpoints (large binary artifacts)
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Kaggle credentials
+kaggle.json
+.kaggle/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log

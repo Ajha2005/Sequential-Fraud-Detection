@@ -1,0 +1,18 @@
+{
+  "model_used_for_fraud_prob": "lstm",
+  "fraud_prob_threshold": 0.5,
+  "anomaly_score_threshold": 0.00033414246281608944,
+  "anomaly_percentile_basis": 90,
+  "quadrant_counts": {
+    "Normal": 12140,
+    "Fault": 1353,
+    "Edge case": 514,
+    "Fraud": 412
+  },
+  "qualitative_validation_on_synthetic_ground_truth": {
+    "note": "Only measurable because the underlying data is synthetic (see synthetic.py). With real Kaggle data, 'Fault' quadrant samples must be reviewed manually instead.",
+    "fraction_of_true_synthetic_faults_landing_in_Fault_quadrant": 0.1210762331838565,
+    "fraction_of_true_fraud_landing_in_Fraud_quadrant": 0.5275482093663911,
+    "fraction_of_true_normal_landing_in_Normal_quadrant": 0.8969594594594594
+  }
+}

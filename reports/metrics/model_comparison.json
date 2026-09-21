@@ -1,0 +1,96 @@
+{
+  "xgboost": {
+    "n": 4825,
+    "positive_rate": 0.06839378238341969,
+    "accuracy": 0.9736787564766839,
+    "precision": 0.7706666666666667,
+    "recall": 0.8757575757575757,
+    "auc_roc": 0.9886345097246099,
+    "pr_auc": 0.9273569548074898,
+    "confusion_matrix": [
+      [
+        4409,
+        86
+      ],
+      [
+        41,
+        289
+      ]
+    ]
+  },
+  "logreg": {
+    "n": 4825,
+    "positive_rate": 0.06839378238341969,
+    "accuracy": 0.9533678756476683,
+    "precision": 0.6056338028169014,
+    "recall": 0.9121212121212121,
+    "auc_roc": 0.9841399534836687,
+    "pr_auc": 0.8956537379329087,
+    "confusion_matrix": [
+      [
+        4299,
+        196
+      ],
+      [
+        29,
+        301
+      ]
+    ]
+  },
+  "lstm": {
+    "n": 4607,
+    "positive_rate": 0.06772303017147818,
+    "accuracy": 0.9798133275450401,
+    "precision": 0.7983651226158038,
+    "recall": 0.9391025641025641,
+    "auc_roc": 0.9946553834213904,
+    "pr_auc": 0.9611901243467132,
+    "confusion_matrix": [
+      [
+        4221,
+        74
+      ],
+      [
+        19,
+        293
+      ]
+    ]
+  },
+  "transformer": {
+    "n": 4607,
+    "positive_rate": 0.06772303017147818,
+    "accuracy": 0.9693943998263512,
+    "precision": 0.708029197080292,
+    "recall": 0.9326923076923077,
+    "auc_roc": 0.991012954837169,
+    "pr_auc": 0.9428623086158909,
+    "confusion_matrix": [
+      [
+        4175,
+        120
+      ],
+      [
+        21,
+        291
+      ]
+    ]
+  },
+  "published_benchmarks": {
+    "Random / majority-class baseline": {
+      "auc_roc": 0.5,
+      "source": "sanity floor"
+    },
+    "Strong supervised baseline (published, low)": {
+      "auc_roc": 0.9,
+      "source": "published range 0.90-0.93"
+    },
+    "Strong supervised baseline (published, high)": {
+      "auc_roc": 0.93,
+      "source": "published range 0.90-0.93"
+    },
+    "Kaggle competition winners (ceiling)": {
+      "auc_roc": 0.945,
+      "source": "published range 0.945-0.950, large ensembles"
+    }
+  }
+}
