@@ -1,0 +1,99 @@
+# Central configuration for the Sequential Fault & Fraud Detection pipeline.
+# All scripts under scripts/ read this file so parameters live in one place.
+
+seed: 42
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  # If real Kaggle CSVs are not present in raw_dir, the pipeline falls back to
+  # generating a synthetic dataset that mirrors the IEEE-CIS schema, so the
+  # full pipeline is always runnable end to end.
+  use_synthetic_if_missing: true
+  synthetic:
+    n_cards: 3000          # number of distinct cardholders
+    min_txns_per_card: 1
+    max_txns_per_card: 60
+    n_days: 60              # span of TransactionDT in days
+    fraud_rate: 0.035       # ~3.5% positive, matches IEEE-CIS imbalance
+    fault_rate: 0.05        # fraction of *non-fraud* txns seeded as "faults" (benign anomalies)
+    random_state: 42
+
+sequence:
+  id_column: card_id
+  time_column: TransactionDT
+  max_seq_len: 30          # fixed length after padding/truncation (justified in EDA histogram)
+  train_frac: 0.70
+  val_frac: 0.15
+  test_frac: 0.15
+  split_strategy: time      # split by transaction time, then ensure user disjointness
+
+categorical_features:
+  - ProductCD
+  - card_type
+  - card_category
+  - merchant_category
+  - device_type
+  - email_domain
+
+numeric_features:
+  - log_amt
+  - log_time_delta
+  - amt_dev
+  - amt_zscore
+  - txn_hour
+  - txn_dow
+  - stab_ProductCD
+  - stab_device_type
+  - stab_email_domain
+
+baseline:
+  xgboost:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    scale_pos_weight_multiplier: 1.0
+  logreg:
+    max_iter: 1000
+    class_weight: balanced
+
+lstm:
+  embedding_dim: 16
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.3
+  bidirectional: false
+  batch_size: 64
+  epochs: 15
+  learning_rate: 0.001
+  weight_decay: 0.00001
+
+transformer:
+  embedding_dim: 16
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  dim_feedforward: 128
+  dropout: 0.3
+  batch_size: 64
+  epochs: 15
+  learning_rate: 0.001
+  weight_decay: 0.00001
+
+autoencoder:
+  hidden_size: 32
+  latent_size: 16
+  num_layers: 1
+  batch_size: 64
+  epochs: 15
+  learning_rate: 0.001
+
+fault_fraud:
+  fraud_prob_threshold: 0.5
+  anomaly_score_percentile: 90   # anomaly scores above this percentile (on normal-only val data) count as "high"
+
+evaluation:
+  n_points_for_confidence_curve: 20
+  history_length_bins: [1, 3, 6, 11, 21, 1000]
