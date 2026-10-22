@@ -26,9 +26,9 @@ def run(cfg: dict | None = None) -> pd.DataFrame:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     acfg = cfg["autoencoder"]
-    numeric_cols = cfg["numeric_features"]
-    categorical_cols = cfg["categorical_features"]
     meta = load_feature_meta(cfg)
+    numeric_cols = meta["numeric_features"]
+    categorical_cols = meta["categorical_features"]
     vocab_sizes = [meta["categorical_vocab_sizes"][c] for c in categorical_cols]
 
     processed_dir = resolve_path(cfg["data"]["processed_dir"])

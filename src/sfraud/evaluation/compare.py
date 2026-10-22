@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from sfraud.datasets.torch_dataset import SequenceDataset
+from sfraud.datasets.torch_dataset import SequenceDataset, load_feature_meta
 from sfraud.evaluation.metrics import binary_classification_metrics
 from sfraud.evaluation.predict import flatten_predictions, get_full_predictions, load_trained_model
 from sfraud.utils.config import checkpoints_dir, load_config, metrics_dir, resolve_path
@@ -38,8 +38,9 @@ def _baseline_predictions_with_position(cfg: dict, model_name: str) -> pd.DataFr
     df = pd.read_parquet(processed_dir / "features_flat.parquet")
     test_df = df[df["split"] == "test"].copy()
 
-    numeric_cols = cfg["numeric_features"]
-    categorical_idx_cols = [f"{c}_idx" for c in cfg["categorical_features"]]
+    meta = load_feature_meta(cfg)
+    numeric_cols = meta["numeric_features"]
+    categorical_idx_cols = [f"{c}_idx" for c in meta["categorical_features"]]
     feature_cols = numeric_cols + categorical_idx_cols
 
     model = joblib.load(checkpoints_dir() / f"{model_name}.joblib")

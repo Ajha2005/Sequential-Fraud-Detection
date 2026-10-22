@@ -10,6 +10,7 @@ import logging
 import joblib
 import pandas as pd
 
+from sfraud.datasets.torch_dataset import load_feature_meta
 from sfraud.evaluation.metrics import binary_classification_metrics
 from sfraud.models.baseline import build_logreg_pipeline, build_xgboost
 from sfraud.utils.config import checkpoints_dir, load_config, metrics_dir, resolve_path
@@ -25,8 +26,9 @@ def run(cfg: dict | None = None) -> dict:
     processed_dir = resolve_path(cfg["data"]["processed_dir"])
     df = pd.read_parquet(processed_dir / "features_flat.parquet")
 
-    numeric_cols = cfg["numeric_features"]
-    categorical_idx_cols = [f"{c}_idx" for c in cfg["categorical_features"]]
+    meta = load_feature_meta(cfg)
+    numeric_cols = meta["numeric_features"]
+    categorical_idx_cols = [f"{c}_idx" for c in meta["categorical_features"]]
     feature_cols = numeric_cols + categorical_idx_cols
 
     splits = {s: df[df["split"] == s] for s in ["train", "val", "test"]}
