@@ -10,7 +10,9 @@ import torch
 from sfraud.datasets.torch_dataset import get_dataloaders, load_feature_meta
 from sfraud.evaluation.metrics import binary_classification_metrics
 from sfraud.models.lstm import LSTMFraudModel
-from sfraud.training.engine import compute_pos_weight, evaluate_epoch, predict_flat, train_one_epoch
+from sfraud.training.engine import (
+    build_loss_fn, compute_pos_weight, evaluate_epoch, predict_flat, train_one_epoch,
+)
 from sfraud.utils.config import checkpoints_dir, load_config, metrics_dir
 from sfraud.utils.seed import set_seed
 
@@ -25,20 +27,24 @@ def run(cfg: dict | None = None) -> dict:
     lcfg = cfg["lstm"]
     loaders = get_dataloaders(cfg, batch_size=lcfg["batch_size"])
     meta = load_feature_meta(cfg)
-    vocab_sizes = [meta["categorical_vocab_sizes"][c] for c in cfg["categorical_features"]]
-    n_numeric = len(cfg["numeric_features"])
+    vocab_sizes = [meta["categorical_vocab_sizes"][c] for c in meta["categorical_features"]]
+    n_numeric = len(meta["numeric_features"])
 
     model = LSTMFraudModel(n_numeric, vocab_sizes, lcfg).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lcfg["learning_rate"], weight_decay=lcfg["weight_decay"])
     pos_weight = compute_pos_weight(loaders["train"]).to(device)
-    logger.info("LSTM pos_weight=%.2f, params=%d", pos_weight.item(), sum(p.numel() for p in model.parameters()))
+    loss_fn = build_loss_fn(lcfg, pos_weight)
+    logger.info(
+        "LSTM loss=%s, pos_weight=%.2f, params=%d",
+        lcfg.get("loss", "bce"), pos_weight.item(), sum(p.numel() for p in model.parameters()),
+    )
 
     best_val_pr_auc = -1.0
     history = []
     ckpt_path = checkpoints_dir() / "lstm_best.pt"
 
     for epoch in range(1, lcfg["epochs"] + 1):
-        train_loss = train_one_epoch(model, loaders["train"], optimizer, device, pos_weight)
+        train_loss = train_one_epoch(model, loaders["train"], optimizer, device, loss_fn)
         val_metrics = evaluate_epoch(model, loaders["val"], device)
         history.append({"epoch": epoch, "train_loss": train_loss, **val_metrics})
         logger.info(

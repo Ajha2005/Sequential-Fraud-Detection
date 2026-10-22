@@ -69,6 +69,9 @@ lstm:
   epochs: 15
   learning_rate: 0.001
   weight_decay: 0.00001
+  loss: focal             # "focal" (Lin et al. 2017) or "bce" (pos_weight-weighted BCE)
+  focal_alpha: 0.25
+  focal_gamma: 2.0
 
 transformer:
   embedding_dim: 16
@@ -81,6 +84,9 @@ transformer:
   epochs: 15
   learning_rate: 0.001
   weight_decay: 0.00001
+  loss: focal             # "focal" (Lin et al. 2017) or "bce" (pos_weight-weighted BCE)
+  focal_alpha: 0.25
+  focal_gamma: 2.0
 
 autoencoder:
   hidden_size: 32
