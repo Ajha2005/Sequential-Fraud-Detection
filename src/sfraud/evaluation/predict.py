@@ -20,8 +20,8 @@ from sfraud.utils.config import checkpoints_dir
 
 def load_trained_model(cfg: dict, model_type: str, device: torch.device) -> torch.nn.Module:
     meta = load_feature_meta(cfg)
-    vocab_sizes = [meta["categorical_vocab_sizes"][c] for c in cfg["categorical_features"]]
-    n_numeric = len(cfg["numeric_features"])
+    vocab_sizes = [meta["categorical_vocab_sizes"][c] for c in meta["categorical_features"]]
+    n_numeric = len(meta["numeric_features"])
 
     if model_type == "lstm":
         model = LSTMFraudModel(n_numeric, vocab_sizes, cfg["lstm"])

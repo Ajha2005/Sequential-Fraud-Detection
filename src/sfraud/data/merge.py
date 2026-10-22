@@ -6,6 +6,9 @@ Common/standardized columns produced here:
     TransactionID, card_id, TransactionDT, TransactionAmt, ProductCD,
     card_type, card_category, addr1, email_domain, merchant_category,
     device_type, device_info, isFraud, synthetic_fault_flag, is_synthetic
+plus, when present in the raw transaction table (real IEEE-CIS only), the
+engineered/anonymized extension columns C1-C14, D1-D15, V1-V339 (numeric) and
+M1-M9 (categorical).
 """
 
 from __future__ import annotations
@@ -33,13 +36,34 @@ PRODUCT_TO_MERCHANT_CATEGORY = {
     "S": "services",
 }
 
+# Real IEEE-CIS ships ~380 extra engineered/anonymized columns that carry most
+# of the dataset's predictive signal. They are absent from the synthetic
+# stand-in, so carrying them through "when present" is a natural no-op there.
+EXTENSION_NUMERIC_COLUMNS = (
+    [f"C{i}" for i in range(1, 15)]
+    + [f"D{i}" for i in range(1, 16)]
+    + [f"V{i}" for i in range(1, 340)]
+)
+EXTENSION_CATEGORICAL_COLUMNS = [f"M{i}" for i in range(1, 10)]
+
 
 def _derive_card_id(df: pd.DataFrame) -> pd.Series:
     """Real IEEE-CIS has no user identifier. card1-6 + addr1-2 is the
     standard community heuristic for approximating one distinct card/user
-    entity (these fields together are stable for a given physical card)."""
+    entity (these fields together are stable for a given physical card).
+
+    A missing field gets a filler unique to that row (and column) rather than
+    the shared literal "nan": otherwise every row missing, say, addr1 (~11% of
+    real rows) collapses into one giant pseudo-card regardless of who the
+    cardholder actually is. Rows that match on every field, with nothing
+    missing, still produce identical ids and so still collide as intended."""
     key_cols = ["card1", "card2", "card3", "card4", "card5", "card6", "addr1", "addr2"]
-    return df[key_cols].astype(str).agg("_".join, axis=1)
+    txn_id = df["TransactionID"].astype(str)
+    card_id = None
+    for col in key_cols:
+        part = df[col].astype(str).where(df[col].notna(), "MISSING_" + txn_id + "_" + col)
+        card_id = part if card_id is None else card_id + "_" + part
+    return card_id
 
 
 def _standardize(txn_df: pd.DataFrame, identity_df: pd.DataFrame, is_synthetic: bool) -> pd.DataFrame:
@@ -64,7 +88,12 @@ def _standardize(txn_df: pd.DataFrame, identity_df: pd.DataFrame, is_synthetic: 
         "card_type", "card_category", "addr1", "email_domain", "merchant_category",
         "device_type", "device_info", "isFraud", "synthetic_fault_flag", "is_synthetic",
     ]
-    out = df[keep].copy()
+    ext_numeric = [c for c in EXTENSION_NUMERIC_COLUMNS if c in df.columns]
+    ext_categorical = [c for c in EXTENSION_CATEGORICAL_COLUMNS if c in df.columns]
+    out = df[keep + ext_numeric + ext_categorical].copy()
+    out[ext_numeric] = out[ext_numeric].fillna(0.0)
+    for col in ext_categorical:
+        out[col] = out[col].fillna("missing").astype(str)
     out["email_domain"] = out["email_domain"].fillna("missing")
     out["device_type"] = out["device_type"].fillna("missing")
     out["device_info"] = out["device_info"].fillna("missing")

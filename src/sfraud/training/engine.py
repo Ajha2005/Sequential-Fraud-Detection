@@ -4,9 +4,12 @@ computed only over valid (non-padded) positions via `mask`."""
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.metrics import average_precision_score, roc_auc_score
 from torch.utils.data import DataLoader
 
@@ -20,9 +23,42 @@ def masked_bce_with_logits(
     return per_elem.sum() / mask.sum().clamp(min=1.0)
 
 
+def masked_focal_loss_with_logits(
+    logits: torch.Tensor, y: torch.Tensor, mask: torch.Tensor, alpha: float = 0.25, gamma: float = 2.0
+) -> torch.Tensor:
+    """Focal loss (Lin et al., 2017), FL = -alpha_t * (1 - p_t)^gamma * log(p_t),
+    averaged over valid (mask == 1) positions only, like masked_bce_with_logits.
+    Down-weights easy, confidently-correct examples so the rare fraud positives
+    dominate the gradient without needing an explicit pos_weight."""
+    bce = F.binary_cross_entropy_with_logits(logits, y, reduction="none")  # = -log(p_t)
+    p = torch.sigmoid(logits)
+    p_t = p * y + (1.0 - p) * (1.0 - y)
+    alpha_t = alpha * y + (1.0 - alpha) * (1.0 - y)
+    per_elem = alpha_t * (1.0 - p_t).clamp(min=0.0) ** gamma * bce
+    per_elem = per_elem * mask
+    return per_elem.sum() / mask.sum().clamp(min=1.0)
+
+
+LossFn = Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]
+
+
+def build_loss_fn(model_cfg: dict, pos_weight: torch.Tensor) -> LossFn:
+    """Returns a loss_fn(logits, y, mask) closure chosen by model_cfg["loss"]
+    ("bce" -- the default -- or "focal"). Focal reads focal_alpha/focal_gamma
+    from the same config section; pos_weight is only used by "bce"."""
+    loss_type = model_cfg.get("loss", "bce")
+    if loss_type == "bce":
+        return lambda logits, y, mask: masked_bce_with_logits(logits, y, mask, pos_weight)
+    if loss_type == "focal":
+        alpha = model_cfg.get("focal_alpha", 0.25)
+        gamma = model_cfg.get("focal_gamma", 2.0)
+        return lambda logits, y, mask: masked_focal_loss_with_logits(logits, y, mask, alpha=alpha, gamma=gamma)
+    raise ValueError(f"Unknown loss type: {loss_type!r} (expected 'bce' or 'focal')")
+
+
 def train_one_epoch(
     model: nn.Module, loader: DataLoader, optimizer: torch.optim.Optimizer, device: torch.device,
-    pos_weight: torch.Tensor,
+    loss_fn: LossFn,
 ) -> float:
     model.train()
     total_loss, total_count = 0.0, 0
@@ -34,7 +70,7 @@ def train_one_epoch(
 
         optimizer.zero_grad()
         logits = model(x_num, x_cat)
-        loss = masked_bce_with_logits(logits, y, mask, pos_weight)
+        loss = loss_fn(logits, y, mask)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
         optimizer.step()

@@ -33,6 +33,7 @@ import logging
 import numpy as np
 import pandas as pd
 
+from sfraud.data.merge import EXTENSION_CATEGORICAL_COLUMNS, EXTENSION_NUMERIC_COLUMNS
 from sfraud.features.engineering import engineer_features
 from sfraud.utils.config import load_config, resolve_path
 
@@ -115,15 +116,31 @@ def _build_split_arrays(
     }
 
 
+def _effective_feature_lists(df: pd.DataFrame, cfg: dict) -> tuple[list[str], list[str]]:
+    """Config's base feature lists plus whichever C/D/V (numeric) and M
+    (categorical) extension columns actually made it through merge. On the
+    synthetic stand-in none do, so this returns the base lists unchanged."""
+    numeric_cols = list(cfg["numeric_features"])
+    categorical_cols = list(cfg["categorical_features"])
+    numeric_cols += [c for c in EXTENSION_NUMERIC_COLUMNS if c in df.columns and c not in numeric_cols]
+    categorical_cols += [c for c in EXTENSION_CATEGORICAL_COLUMNS if c in df.columns and c not in categorical_cols]
+    return numeric_cols, categorical_cols
+
+
 def build_sequences(cfg: dict | None = None) -> dict:
     from sfraud.data.merge import load_merged_dataset
 
     cfg = cfg or load_config()
-    numeric_cols = cfg["numeric_features"]
-    categorical_cols = cfg["categorical_features"]
     max_seq_len = cfg["sequence"]["max_seq_len"]
 
     df = load_merged_dataset(cfg)
+    numeric_cols, categorical_cols = _effective_feature_lists(df, cfg)
+    logger.info(
+        "Effective features: %d numeric (%d base + %d extension), %d categorical (%d base + %d extension)",
+        len(numeric_cols), len(cfg["numeric_features"]), len(numeric_cols) - len(cfg["numeric_features"]),
+        len(categorical_cols), len(cfg["categorical_features"]),
+        len(categorical_cols) - len(cfg["categorical_features"]),
+    )
     df, vocabs = engineer_features(df, categorical_cols)
     df = assign_splits(df, cfg)
 
