@@ -48,19 +48,33 @@ EXTENSION_CATEGORICAL_COLUMNS = [f"M{i}" for i in range(1, 10)]
 
 
 def _derive_card_id(df: pd.DataFrame) -> pd.Series:
-    """Real IEEE-CIS has no user identifier. card1-6 + addr1-2 is the
-    standard community heuristic for approximating one distinct card/user
-    entity (these fields together are stable for a given physical card).
+    """Real IEEE-CIS has no user identifier. We approximate one from
+    card1, card2, card3, card5 -- numeric, high-cardinality (card1 alone has
+    ~13,500 distinct values), and rarely missing, so they are genuinely
+    identifying on their own.
 
-    A missing field gets a filler unique to that row (and column) rather than
-    the shared literal "nan": otherwise every row missing, say, addr1 (~11% of
-    real rows) collapses into one giant pseudo-card regardless of who the
-    cardholder actually is. Rows that match on every field, with nothing
-    missing, still produce identical ids and so still collide as intended."""
-    key_cols = ["card1", "card2", "card3", "card4", "card5", "card6", "addr1", "addr2"]
+    card4, card6, addr1 and addr2 are deliberately left out of the key.
+    card4/card6 are low-cardinality categoricals (card network, debit vs.
+    credit) that add little discriminating power. addr1 is blank on ~11% of
+    real rows, and -- this is the point -- there is no sound way to encode
+    "missing" so it matches a *present* value for the same underlying card
+    on another transaction; whatever placeholder a missing addr1 gets, it
+    can never equal an actual address string, so including it either
+    fragments a card's own history whenever its address happens to be
+    missing on one of its transactions, or (the original version of this
+    function) merges unrelated cardholders whenever both of theirs are
+    missing. Dropping it avoids both failure modes rather than trading one
+    for the other.
+
+    A missing *core* field (card1/2/3/5) is rare but real: that row gets a
+    filler unique to it (by TransactionID), since there is no safe way to
+    guess who it belongs to, and it must not be merged with anything.
+    """
+    core_cols = ["card1", "card2", "card3", "card5"]
     txn_id = df["TransactionID"].astype(str)
+
     card_id = None
-    for col in key_cols:
+    for col in core_cols:
         part = df[col].astype(str).where(df[col].notna(), "MISSING_" + txn_id + "_" + col)
         card_id = part if card_id is None else card_id + "_" + part
     return card_id

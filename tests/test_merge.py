@@ -14,13 +14,43 @@ def _txn_row(txn_id, **overrides):
     return row
 
 
-def test_card_id_missing_field_does_not_collide_across_rows():
-    """Regression: a naive astype(str) turned every missing addr1 into the
-    shared literal "nan", merging unrelated cardholders into one mega-card."""
-    df = pd.DataFrame([_txn_row(1, addr1=np.nan), _txn_row(2, addr1=np.nan)])
+def test_card_id_different_core_fields_do_not_collide():
+    """Regression (original bug): a naive astype(str) turned every missing
+    addr1 into the shared literal "nan", merging unrelated cardholders --
+    different core card fields -- into one mega-card."""
+    df = pd.DataFrame([_txn_row(1, card1=1111, addr1=np.nan), _txn_row(2, card1=2222, addr1=np.nan)])
     card_ids = _derive_card_id(df)
     assert card_ids.iloc[0] != card_ids.iloc[1]
     assert "nan" not in card_ids.iloc[0]
+
+
+def test_card_id_ignores_soft_fields_for_same_core_identity():
+    """Regression (overcorrection bug): an earlier version made *every*
+    missing field unique per row -- including low-signal fields like addr1,
+    which is blank on ~11% of real rows -- which fragmented a single
+    person's own history into singletons the moment one of their
+    transactions had a missing address, and crushed the real-data median
+    sequence length from 2 to 1. card4/card6/addr1/addr2 are excluded from
+    the identity key entirely (see _derive_card_id's docstring for why a
+    missing-vs-present placeholder scheme can't work here), so rows that
+    agree on the core numeric fields (card1/card2/card3/card5) collide
+    regardless of what those soft fields are doing -- missing, present, or
+    disagreeing outright."""
+    df = pd.DataFrame(
+        [_txn_row(1, addr1=np.nan, card4="visa"), _txn_row(2, addr1=315.0, card4="visa"),
+         _txn_row(3, addr1=999.0, card4="mastercard")]
+    )
+    card_ids = _derive_card_id(df)
+    assert card_ids.iloc[0] == card_ids.iloc[1] == card_ids.iloc[2]
+
+
+def test_card_id_missing_core_field_does_not_collide():
+    """A missing *core* field (card1/card2/card3/card5) is a genuine loss of
+    identifying signal -- unlike a missing soft field, it must still isolate
+    the row rather than guess at a match."""
+    df = pd.DataFrame([_txn_row(1, card1=np.nan), _txn_row(2, card1=np.nan)])
+    card_ids = _derive_card_id(df)
+    assert card_ids.iloc[0] != card_ids.iloc[1]
 
 
 def test_card_id_fully_matching_rows_still_collide():
