@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from sfraud.data.synthetic import generate_synthetic_tables
@@ -49,33 +50,44 @@ EXTENSION_CATEGORICAL_COLUMNS = [f"M{i}" for i in range(1, 10)]
 
 def _derive_card_id(df: pd.DataFrame) -> pd.Series:
     """Real IEEE-CIS has no user identifier. We approximate one from
-    card1, card2, card3, card5 -- numeric, high-cardinality (card1 alone has
-    ~13,500 distinct values), and rarely missing, so they are genuinely
-    identifying on their own.
+    card1, card2, card3, card5 plus the account's start day,
+    floor(TransactionDT / 86400 - D1).
 
-    card4, card6, addr1 and addr2 are deliberately left out of the key.
-    card4/card6 are low-cardinality categoricals (card network, debit vs.
-    credit) that add little discriminating power. addr1 is blank on ~11% of
-    real rows, and -- this is the point -- there is no sound way to encode
-    "missing" so it matches a *present* value for the same underlying card
-    on another transaction; whatever placeholder a missing addr1 gets, it
-    can never equal an actual address string, so including it either
-    fragments a card's own history whenever its address happens to be
-    missing on one of its transactions, or (the original version of this
-    function) merges unrelated cardholders whenever both of theirs are
-    missing. Dropping it avoids both failure modes rather than trading one
-    for the other.
+    Why this key (measured on the real 590,540-row train_transaction.csv, over
+    the 579,507 rows with no missing core field):
 
-    A missing *core* field (card1/2/3/5) is rare but real: that row gets a
+      core only (card1/2/3/5)  13,656 groups, largest 14,112 txns, top 10
+                               groups hold 14.5% of rows. Those fields
+                               identify an issuer/product bucket, not a
+                               person: the biggest groups share
+                               card2/3/5 and differ only in card1.
+      core + addr1             40,588 groups, largest 9,900.
+      core + start day         149,717 groups, median 2, p99 32, largest
+                               1,414, top 10 hold 0.7% of rows.   <- used
+      core + addr1 + start day 216,514 groups, median 1: over-fragmented.
+
+    D1 is a days-since-account-start style counter, so TransactionDT/86400 - D1
+    is (approximately) a constant for one account over time and differs
+    between different accounts that share the same card bucket. This is the
+    widely used community heuristic for IEEE-CIS, not a documented ground
+    truth: there is no real user id here, so any key is an approximation.
+
+    card4, card6, addr1 and addr2 stay out of the key. addr1 is blank on ~11%
+    of real rows, and there is no sound way to encode "missing" so it matches
+    a *present* value for the same card on another transaction, so including
+    it fragments a card's own history (see the last row above).
+
+    A row missing a core field or D1 is rare but real signal loss: it gets a
     filler unique to it (by TransactionID), since there is no safe way to
-    guess who it belongs to, and it must not be merged with anything.
+    guess who it belongs to and it must not be merged with anything.
     """
-    core_cols = ["card1", "card2", "card3", "card5"]
     txn_id = df["TransactionID"].astype(str)
+    key_parts = {col: df[col] for col in ["card1", "card2", "card3", "card5"]}
+    key_parts["start_day"] = np.floor(df["TransactionDT"] / 86400 - df["D1"])
 
     card_id = None
-    for col in core_cols:
-        part = df[col].astype(str).where(df[col].notna(), "MISSING_" + txn_id + "_" + col)
+    for name, values in key_parts.items():
+        part = values.astype(str).where(values.notna(), "MISSING_" + txn_id + "_" + name)
         card_id = part if card_id is None else card_id + "_" + part
     return card_id
 

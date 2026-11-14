@@ -9,6 +9,8 @@ def _txn_row(txn_id, **overrides):
     row = {
         "TransactionID": txn_id, "card1": 1111, "card2": 222.0, "card3": 150.0, "card4": "visa",
         "card5": 226.0, "card6": "debit", "addr1": 315.0, "addr2": 87.0,
+        # Account start day = floor(TransactionDT / 86400 - D1) = 10 - 3 = 7 by default.
+        "TransactionDT": 10 * 86400, "D1": 3.0,
     }
     row.update(overrides)
     return row
@@ -53,6 +55,35 @@ def test_card_id_missing_core_field_does_not_collide():
     assert card_ids.iloc[0] != card_ids.iloc[1]
 
 
+def test_card_id_same_account_across_time_collides():
+    """The same account transacting on different days has a larger D1 later, so
+    TransactionDT/86400 - D1 (the account start day) stays constant."""
+    df = pd.DataFrame(
+        [_txn_row(1, TransactionDT=10 * 86400, D1=3.0), _txn_row(2, TransactionDT=15 * 86400, D1=8.0)]
+    )
+    card_ids = _derive_card_id(df)
+    assert card_ids.iloc[0] == card_ids.iloc[1]
+
+
+def test_card_id_different_accounts_in_same_card_bucket_do_not_collide():
+    """Regression (real-data finding): card1/2/3/5 alone identify an issuer or
+    product bucket, so thousands of different cardholders (the largest group
+    was 14,112 transactions) shared one id. A different account start day
+    must split them even when every core field matches."""
+    df = pd.DataFrame([_txn_row(1, D1=3.0), _txn_row(2, D1=0.0)])
+    card_ids = _derive_card_id(df)
+    assert card_ids.iloc[0] != card_ids.iloc[1]
+
+
+def test_card_id_missing_d1_does_not_collide():
+    """A missing D1 means the account start day is unknown: isolate the row,
+    never merge it with another missing-D1 row or with a present-D1 row."""
+    df = pd.DataFrame([_txn_row(1, D1=np.nan), _txn_row(2, D1=np.nan), _txn_row(3)])
+    card_ids = _derive_card_id(df)
+    assert len(set(card_ids)) == 3
+    assert not any("nan" in c for c in card_ids)
+
+
 def test_card_id_fully_matching_rows_still_collide():
     df = pd.DataFrame([_txn_row(1), _txn_row(2)])
     card_ids = _derive_card_id(df)
@@ -75,7 +106,10 @@ def _standardize_inputs(extra_txn_cols=None):
 
 
 def test_standardize_is_noop_without_extension_columns():
+    # Synthetic-style input: it ships its own card_id and has no D1 (D1 is an
+    # extension column, and real data needs it only to derive card_id).
     txn, identity = _standardize_inputs()
+    txn = txn.drop(columns=["D1"]).assign(card_id=["a", "b"])
     out = _standardize(txn, identity, is_synthetic=True)
     assert not any(c[0] in "CDMV" and c[1:].isdigit() for c in out.columns)
 
