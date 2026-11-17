@@ -84,11 +84,19 @@ python3 scripts/phase0_get_data.py           # Phase 0: real data if Kaggle cred
 python3 scripts/phase1_eda.py                # Phase 1: merge + EDA plots/stats -> reports/figures, reports/metrics
 python3 scripts/phase2_build_sequences.py    # Phase 2: feature engineering + padded sequences -> data/processed
 python3 scripts/phase3_train_baseline.py     # Phase 3: XGBoost + Logistic Regression
+python3 scripts/phase3b_train_xgb_plus.py    # Phase 3b: stronger XGBoost (richer features, tuned) + its no-history ablation
 python3 scripts/phase4_train_deep_models.py  # Phase 4: LSTM + Transformer (stretch goal)
 python3 scripts/phase5_fault_fraud.py        # Phase 5: autoencoder anomaly head + fault/fraud quadrant logic
 python3 scripts/phase6_evaluate.py           # Phase 6: benchmark comparison, accuracy-vs-N, stratification, error analysis
+python3 scripts/phase6b_blend_thresholds.py  # Phase 6b: same-rows comparison, validation-chosen blend and thresholds
 python3 scripts/phase7_visualize.py          # Phase 7: all plots
 ```
+
+### What Phases 3b and 6b add
+
+- **Phase 3b** trains `xgboost_plus` on `features_xgb.parquet` (built in Phase 2 by `features/xgb_features.py`): C/D/V kept as NaN plus per-family missing counts, extra raw columns (`card1/2/3/5`, `addr1/2`, `dist1/2`, `R_emaildomain`, `id_*`), train-only frequency encodings, and causal per-card history (prior-transaction aggregates, rolling 1h/1d/7d counts and spend, "changed since last transaction" flags). It uses early stopping and a small grid scored on validation PR-AUC. `xgboost_plus_nohist` is the same model with every history-derived feature removed -- the fair test of whether card history helps.
+- **Phase 6b** scores every model on the **same** validation/test rows (the sequence models only cover each card's first 30 transactions, so per-model numbers in Phase 6 are over slightly different rows), Platt-calibrates two models on validation and picks the blend weight on validation PR-AUC, and chooses decision thresholds on **validation** (F1-optimal, plus the highest-precision threshold reaching each target recall) before reporting them on test. Outputs: `reports/metrics/blend_and_thresholds.json`, `threshold_table.csv`, `by_history_length_common.csv`.
+- The fault/fraud quadrant and error analysis use the validation-chosen fraud threshold (`fault_fraud.fraud_prob_threshold: auto`) rather than a fixed 0.5.
 
 Everything is controlled by `configs/config.yaml` (sequence length, model hyperparameters, thresholds, train/val/test fractions, `seed: 42`). Change it there rather than passing flags -- every script reads the same file.
 

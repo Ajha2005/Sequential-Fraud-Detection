@@ -18,6 +18,8 @@ import torch
 from sfraud.datasets.torch_dataset import SequenceDataset, load_feature_meta
 from sfraud.evaluation.metrics import binary_classification_metrics
 from sfraud.evaluation.predict import flatten_predictions, get_full_predictions, load_trained_model
+from sfraud.features.xgb_features import load_xgb_table
+from sfraud.training.train_xgb_plus import predict_proba_best
 from sfraud.utils.config import checkpoints_dir, load_config, metrics_dir, resolve_path
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,20 @@ def _baseline_predictions_with_position(cfg: dict, model_name: str) -> pd.DataFr
     return test_df[["TransactionID", "card_id", "n_seen", "isFraud", "synthetic_fault_flag", "fraud_prob"]]
 
 
+def _xgb_plus_predictions_with_position(cfg: dict, model_name: str) -> pd.DataFrame | None:
+    """Predictions of the stronger XGBoost (or its no-history ablation) on the
+    test split, or None if Phase 3b has not been run."""
+    path = checkpoints_dir() / f"{model_name}.joblib"
+    if not path.exists():
+        return None
+    table, _ = load_xgb_table(cfg)
+    test_df = table[table["split"] == "test"].copy()
+    model = joblib.load(path)
+    test_df["fraud_prob"] = predict_proba_best(model, test_df[model.get_booster().feature_names])
+    test_df["n_seen"] = test_df["txn_index_in_card"] + 1
+    return test_df[["TransactionID", "card_id", "n_seen", "isFraud", "synthetic_fault_flag", "fraud_prob"]]
+
+
 def _sequence_predictions_with_position(cfg: dict, model_type: str) -> pd.DataFrame:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_trained_model(cfg, model_type, device)
@@ -58,12 +74,17 @@ def _sequence_predictions_with_position(cfg: dict, model_type: str) -> pd.DataFr
 
 
 def get_test_predictions(cfg: dict) -> dict[str, pd.DataFrame]:
-    return {
+    preds = {
         "xgboost": _baseline_predictions_with_position(cfg, "xgboost"),
         "logreg": _baseline_predictions_with_position(cfg, "logreg"),
         "lstm": _sequence_predictions_with_position(cfg, "lstm"),
         "transformer": _sequence_predictions_with_position(cfg, "transformer"),
     }
+    for name in ("xgboost_plus_nohist", "xgboost_plus"):
+        extra = _xgb_plus_predictions_with_position(cfg, name)
+        if extra is not None:
+            preds[name] = extra
+    return preds
 
 
 def confidence_curve(

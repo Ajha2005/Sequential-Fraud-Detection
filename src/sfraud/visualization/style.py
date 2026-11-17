@@ -17,13 +17,19 @@ CATEGORY_COLORS = {
 MODEL_COLORS = {
     "logreg": "#8C8C8C",
     "xgboost": "#4C72B0",
+    "xgboost_plus_nohist": "#9DB4D8",
+    "xgboost_plus": "#1F3A6E",
     "lstm": "#C44E52",
     "transformer": "#55A868",
+    "blend": "#8172B2",
 }
 
 MODEL_LABELS = {
     "logreg": "Logistic Regression",
-    "xgboost": "XGBoost",
+    "xgboost": "XGBoost (baseline)",
+    "xgboost_plus_nohist": "XGBoost+ (no history)",
+    "xgboost_plus": "XGBoost+",
     "lstm": "LSTM",
     "transformer": "Transformer",
+    "blend": "Blend (XGBoost+ & LSTM)",
 }

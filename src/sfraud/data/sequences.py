@@ -35,6 +35,7 @@ import pandas as pd
 
 from sfraud.data.merge import EXTENSION_CATEGORICAL_COLUMNS, EXTENSION_NUMERIC_COLUMNS
 from sfraud.features.engineering import engineer_features
+from sfraud.features.xgb_features import build_xgb_table, write_xgb_table
 from sfraud.utils.config import load_config, resolve_path
 
 logger = logging.getLogger(__name__)
@@ -144,11 +145,22 @@ def build_sequences(cfg: dict | None = None) -> dict:
     df, vocabs = engineer_features(df, categorical_cols)
     df = assign_splits(df, cfg)
 
-    scaler = _fit_scaler(df, numeric_cols)
-    df = _apply_scaler(df, numeric_cols, scaler)
-
+    # Gradient-boosted models get their own table built from the NaN-preserving
+    # frame (same card-level split). Written BEFORE the zero-fill below.
+    xgb_table, xgb_meta = build_xgb_table(df, cfg["numeric_features"], cfg["categorical_features"])
     out_dir = resolve_path(cfg["data"]["processed_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
+    write_xgb_table(xgb_table, xgb_meta, out_dir)
+    del xgb_table
+
+    # The sequence models / logistic regression need a dense matrix: C/D/V NaN
+    # -> 0 (after z-scoring below this is effectively mean-imputation of 0).
+    ext_numeric = [c for c in EXTENSION_NUMERIC_COLUMNS if c in df.columns]
+    if ext_numeric:
+        df[ext_numeric] = df[ext_numeric].fillna(0.0)
+
+    scaler = _fit_scaler(df, numeric_cols)
+    df = _apply_scaler(df, numeric_cols, scaler)
 
     flat_cols = [
         "TransactionID", "card_id", "TransactionDT", "TransactionAmt", "isFraud",

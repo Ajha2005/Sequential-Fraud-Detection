@@ -18,7 +18,7 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from sfraud.data.merge import load_merged_dataset
+from sfraud.data.merge import EXTENSION_NUMERIC_COLUMNS, EXTRA_RAW_COLUMNS, load_merged_dataset
 from sfraud.utils.config import figures_dir, load_config, metrics_dir
 from sfraud.visualization.style import COLOR_FRAUD, COLOR_NEUTRAL, COLOR_NORMAL
 
@@ -40,7 +40,20 @@ def run_eda(cfg: dict | None = None) -> dict:
     stats["n_rows"] = int(len(df))
     stats["n_cards"] = int(df["card_id"].nunique())
     stats["fraud_rate"] = float(df["isFraud"].mean())
-    stats["missing_values"] = {k: int(v) for k, v in df.isnull().sum().items() if v > 0}
+    # C/D/V/M extension columns and the extra raw columns are left NaN on
+    # purpose (see merge.py); reporting each of the ~400 individually would
+    # drown the standard columns, so summarize them instead.
+    null_counts = df.isnull().sum()
+    wide = [c for c in df.columns if c in EXTENSION_NUMERIC_COLUMNS or c in EXTRA_RAW_COLUMNS]
+    stats["missing_values"] = {k: int(v) for k, v in null_counts.drop(labels=wide).items() if v > 0}
+    if wide:
+        wide_frac = null_counts[wide] / len(df)
+        stats["wide_columns_missing"] = {
+            "n_columns": len(wide),
+            "n_columns_with_missing": int((null_counts[wide] > 0).sum()),
+            "mean_missing_fraction": float(wide_frac.mean()),
+            "max_missing_fraction": float(wide_frac.max()),
+        }
     stats["data_source"] = "synthetic" if bool(df["is_synthetic"].iloc[0]) else "real_kaggle"
 
     seq_lengths = df.groupby("card_id").size()

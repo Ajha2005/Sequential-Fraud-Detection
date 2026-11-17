@@ -92,7 +92,16 @@ def run(cfg: dict | None = None, model_type: str = "lstm") -> dict:
     quadrant_path = processed_dir / "fault_fraud_quadrants.parquet"
     quadrant_df = pd.read_parquet(quadrant_path) if quadrant_path.exists() else None
 
-    error_profile = characterize_errors(df, quadrant_df)
+    # Same operating threshold the fault/fraud quadrant used (validation-chosen
+    # when the config says "auto"); 0.5 only if Phase 5 has not been run.
+    threshold = 0.5
+    summary_path = metrics_dir() / "fault_fraud_quadrant.json"
+    if summary_path.exists():
+        with open(summary_path) as f:
+            threshold = float(json.load(f).get("fraud_prob_threshold", 0.5))
+    logger.info("Error analysis threshold: %.4f", threshold)
+    error_profile = characterize_errors(df, quadrant_df, threshold=threshold)
+    error_profile["threshold"] = threshold
     with open(metrics_dir() / "error_analysis.json", "w") as f:
         json.dump(error_profile, f, indent=2, default=str)
     logger.info("Error analysis: %s", json.dumps(error_profile, indent=2, default=str))

@@ -8,7 +8,14 @@ Common/standardized columns produced here:
     device_type, device_info, isFraud, synthetic_fault_flag, is_synthetic
 plus, when present in the raw transaction table (real IEEE-CIS only), the
 engineered/anonymized extension columns C1-C14, D1-D15, V1-V339 (numeric) and
-M1-M9 (categorical).
+M1-M9 (categorical), and a set of extra raw columns (card1/2/3/5, addr2,
+dist1/2, R_emaildomain, id_01..id_38) that only the gradient-boosted models
+use (see features/xgb_features.py).
+
+Missing C/D/V values are deliberately left as NaN here: on IEEE-CIS the
+*pattern* of missingness is itself informative and XGBoost handles NaN
+natively. The sequence models and the logistic-regression baseline need a
+dense matrix, so sequences.py zero-fills a copy for them.
 """
 
 from __future__ import annotations
@@ -46,6 +53,14 @@ EXTENSION_NUMERIC_COLUMNS = (
     + [f"V{i}" for i in range(1, 340)]
 )
 EXTENSION_CATEGORICAL_COLUMNS = [f"M{i}" for i in range(1, 10)]
+
+# Raw columns carried through (when present) purely for the gradient-boosted
+# models. The standard feature set above drops them, but on real IEEE-CIS the
+# card/address/distance/identity fields are among the most predictive.
+EXTRA_RAW_COLUMNS = (
+    ["card1", "card2", "card3", "card5", "addr2", "dist1", "dist2", "R_emaildomain"]
+    + [f"id_{i:02d}" for i in range(1, 39)]
+)
 
 
 def _derive_card_id(df: pd.DataFrame) -> pd.Series:
@@ -93,7 +108,12 @@ def _derive_card_id(df: pd.DataFrame) -> pd.Series:
 
 
 def _standardize(txn_df: pd.DataFrame, identity_df: pd.DataFrame, is_synthetic: bool) -> pd.DataFrame:
-    df = txn_df.merge(identity_df, on="TransactionID", how="left")
+    # The public test_identity.csv spells its columns "id-01"; train uses "id_01".
+    identity_df = identity_df.rename(columns=lambda c: c.replace("id-", "id_") if c.startswith("id-") else c)
+    # .copy() consolidates the many column blocks the merge leaves behind;
+    # without it every column assigned below triggers pandas' "highly
+    # fragmented DataFrame" PerformanceWarning on the ~450-column real data.
+    df = txn_df.merge(identity_df, on="TransactionID", how="left").copy()
 
     if "card_id" not in df.columns:
         df["card_id"] = _derive_card_id(df)
@@ -116,8 +136,9 @@ def _standardize(txn_df: pd.DataFrame, identity_df: pd.DataFrame, is_synthetic: 
     ]
     ext_numeric = [c for c in EXTENSION_NUMERIC_COLUMNS if c in df.columns]
     ext_categorical = [c for c in EXTENSION_CATEGORICAL_COLUMNS if c in df.columns]
-    out = df[keep + ext_numeric + ext_categorical].copy()
-    out[ext_numeric] = out[ext_numeric].fillna(0.0)
+    extra_raw = [c for c in EXTRA_RAW_COLUMNS if c in df.columns and c not in keep]
+    out = df[keep + ext_numeric + ext_categorical + extra_raw].copy()
+    # NOTE: ext_numeric is intentionally NOT filled here (see module docstring).
     for col in ext_categorical:
         out[col] = out[col].fillna("missing").astype(str)
     out["email_domain"] = out["email_domain"].fillna("missing")

@@ -26,6 +26,7 @@ import torch
 
 from sfraud.datasets.torch_dataset import SequenceDataset
 from sfraud.evaluation.predict import flatten_predictions, get_full_predictions, load_trained_model
+from sfraud.evaluation.thresholds import best_f1_threshold
 from sfraud.utils.config import load_config, metrics_dir, resolve_path, samples_dir
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,19 @@ def categorize(row: pd.Series) -> str:
     if not row["fraud_high"] and row["anomaly_high"]:
         return QUADRANT_LOW_HIGH
     return QUADRANT_LOW_LOW
+
+
+def resolve_fraud_threshold(setting, df: pd.DataFrame) -> tuple[float, str]:
+    """A number is used as is. "auto" picks the F1-maximizing threshold on the
+    VALIDATION rows only (never test), falling back to 0.5 if validation has a
+    single class."""
+    if setting != "auto":
+        return float(setting), "fixed"
+    val = df[df["split"] == "val"]
+    if val["isFraud"].nunique() < 2:
+        logger.warning("validation split has one class; falling back to fraud threshold 0.5")
+        return 0.5, "fixed_fallback"
+    return best_f1_threshold(val["isFraud"].to_numpy(), val["fraud_prob"].to_numpy()), "val_f1"
 
 
 def build_fraud_prob_table(cfg: dict, model_type: str = "lstm") -> pd.DataFrame:
@@ -77,7 +91,7 @@ def run(cfg: dict | None = None, model_type: str = "lstm") -> pd.DataFrame:
     # this holdout set (Section 3 / config comment), not an arbitrary global cut.
     normal_scores = df.loc[df["isFraud"] == 0, "anomaly_score"]
     anomaly_threshold = float(normal_scores.quantile(ffcfg["anomaly_score_percentile"] / 100.0))
-    fraud_threshold = ffcfg["fraud_prob_threshold"]
+    fraud_threshold, fraud_threshold_source = resolve_fraud_threshold(ffcfg["fraud_prob_threshold"], df)
 
     df["fraud_high"] = df["fraud_prob"] >= fraud_threshold
     df["anomaly_high"] = df["anomaly_score"] >= anomaly_threshold
@@ -101,6 +115,7 @@ def run(cfg: dict | None = None, model_type: str = "lstm") -> pd.DataFrame:
     summary = {
         "model_used_for_fraud_prob": model_type,
         "fraud_prob_threshold": fraud_threshold,
+        "fraud_prob_threshold_source": fraud_threshold_source,
         "anomaly_score_threshold": anomaly_threshold,
         "anomaly_percentile_basis": ffcfg["anomaly_score_percentile"],
         "quadrant_counts": quadrant_counts,

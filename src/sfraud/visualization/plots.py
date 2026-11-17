@@ -193,17 +193,37 @@ def plot_attention_heatmap(cfg: dict, card_id: str | None = None) -> None:
 # ---------------------------------------------------------------------------
 # Plot 5: baseline vs. sequence vs. published-benchmark comparison
 # ---------------------------------------------------------------------------
+def _data_source() -> str:
+    path = metrics_dir() / "eda_stats.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f).get("data_source", "unknown")
+    return "unknown"
+
+
 def plot_benchmark_comparison(cfg: dict) -> None:
     with open(metrics_dir() / "model_comparison.json") as f:
         comparison = json.load(f)
 
-    model_order = ["logreg", "xgboost", "lstm", "transformer"]
-    aucs = [comparison[m]["auc_roc"] for m in model_order]
-    colors = [MODEL_COLORS[m] for m in model_order]
-    labels = [MODEL_LABELS[m] for m in model_order]
+    # Prefer the like-for-like numbers from Phase 6b (every model, and the
+    # blend, scored on exactly the same test rows); otherwise each model's own.
+    common_path = metrics_dir() / "blend_and_thresholds.json"
+    if common_path.exists():
+        with open(common_path) as f:
+            scores = {m: v["auc_roc"] for m, v in json.load(f)["models_on_common"]["test"].items()}
+        basis = "same test rows for every model"
+    else:
+        scores = {m: v["auc_roc"] for m, v in comparison.items() if isinstance(v, dict) and "auc_roc" in v}
+        basis = "each model on its own test rows"
+    preferred = ["logreg", "xgboost", "xgboost_plus_nohist", "xgboost_plus", "lstm", "transformer", "blend"]
+    model_order = [m for m in preferred if m in scores]
+    aucs = [scores[m] for m in model_order]
+    colors = [MODEL_COLORS.get(m, "gray") for m in model_order]
+    labels = [MODEL_LABELS.get(m, m) for m in model_order]
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(10, 5.5))
     bars = ax.bar(labels, aucs, color=colors)
+    ax.tick_params(axis="x", labelrotation=20, labelsize=8)
     for bar, val in zip(bars, aucs):
         ax.text(bar.get_x() + bar.get_width() / 2, val + 0.005, f"{val:.3f}", ha="center", fontsize=9)
 
@@ -219,7 +239,11 @@ def plot_benchmark_comparison(cfg: dict) -> None:
 
     ax.set_ylim(0.4, 1.05)
     ax.set_ylabel("Test AUC-ROC")
-    ax.set_title("Plot 5: Baseline vs. sequence model vs. published benchmarks\n(our numbers are on synthetic stand-in data -- see README)")
+    if _data_source() == "synthetic":
+        note = "our numbers are on the synthetic stand-in data -- see README"
+    else:
+        note = "card-level time split, so not directly comparable to the published figures"
+    ax.set_title(f"Plot 5: Test AUC-ROC by model ({basis})\n({note})", fontsize=10)
     ax.legend(fontsize=8, loc="lower right")
     fig.tight_layout()
     fig.savefig(figures_dir() / "plot5_benchmark_comparison.png", dpi=150)
@@ -229,12 +253,27 @@ def plot_benchmark_comparison(cfg: dict) -> None:
 # ---------------------------------------------------------------------------
 # Plot 6: confusion matrix for the final fraud model
 # ---------------------------------------------------------------------------
-def plot_confusion_matrix(cfg: dict, model_name: str = "lstm") -> None:
-    with open(metrics_dir() / "model_comparison.json") as f:
-        comparison = json.load(f)
-    cm = np.array(comparison[model_name]["confusion_matrix"])
+def plot_confusion_matrix(cfg: dict, model_name: str | None = None) -> None:
+    """Uses the validation-chosen (F1-optimal) operating point from Phase 6b
+    when available; otherwise the LSTM at a fixed 0.5."""
+    model_name = model_name or cfg.get("evaluation", {}).get("confusion_matrix_model", "lstm")
+    threshold_note = "threshold 0.5"
+    blend_path = metrics_dir() / "blend_and_thresholds.json"
+    cm = None
+    if blend_path.exists():
+        with open(blend_path) as f:
+            points = json.load(f)["operating_points"]
+        if model_name in points:
+            test_point = points[model_name]["f1"]["test"]
+            cm = np.array(test_point["confusion_matrix"])
+            threshold_note = f"threshold {test_point['threshold']:.3f}, chosen on validation"
+    if cm is None:
+        model_name = "lstm"
+        with open(metrics_dir() / "model_comparison.json") as f:
+            comparison = json.load(f)
+        cm = np.array(comparison[model_name]["confusion_matrix"])
 
-    fig, ax = plt.subplots(figsize=(5, 4.5))
+    fig, ax = plt.subplots(figsize=(6.5, 5))  # wide enough for the longer "Blend (XGBoost+ & LSTM)" title
     im = ax.imshow(cm, cmap="Blues")
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
@@ -244,7 +283,7 @@ def plot_confusion_matrix(cfg: dict, model_name: str = "lstm") -> None:
     ax.set_yticks([0, 1])
     ax.set_xticklabels(["Predicted normal", "Predicted fraud"])
     ax.set_yticklabels(["Actual normal", "Actual fraud"])
-    ax.set_title(f"Plot 6: Confusion matrix -- {MODEL_LABELS.get(model_name, model_name)} (test)")
+    ax.set_title(f"Plot 6: Confusion matrix -- {MODEL_LABELS.get(model_name, model_name)} (test)\n{threshold_note}", fontsize=10)
     fig.colorbar(im, ax=ax)
     fig.tight_layout()
     fig.savefig(figures_dir() / "plot6_confusion_matrix.png", dpi=150)

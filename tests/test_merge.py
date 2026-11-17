@@ -114,15 +114,27 @@ def test_standardize_is_noop_without_extension_columns():
     assert not any(c[0] in "CDMV" and c[1:].isdigit() for c in out.columns)
 
 
-def test_standardize_carries_and_fills_extension_columns():
+def test_standardize_carries_extension_columns_and_keeps_numeric_nan():
+    """C/D/V stay NaN (XGBoost uses the missingness itself; sequences.py zero-fills
+    a copy for the dense models). Categorical M columns are still filled."""
     txn, identity = _standardize_inputs(
         {"C1": [3.0, np.nan], "D1": [np.nan, 7.0], "V5": [np.nan, np.nan], "M4": ["M2", np.nan]}
     )
     out = _standardize(txn, identity, is_synthetic=False)
-    assert out["C1"].tolist() == [3.0, 0.0]
-    assert out["D1"].tolist() == [0.0, 7.0]
-    assert out["V5"].tolist() == [0.0, 0.0]
+    assert out["C1"].isna().tolist() == [False, True] and out["C1"].iloc[0] == 3.0
+    assert out["D1"].isna().tolist() == [True, False] and out["D1"].iloc[1] == 7.0
+    assert out["V5"].isna().all()
     assert out["M4"].tolist() == ["M2", "missing"]
+
+
+def test_standardize_carries_extra_raw_columns_for_boosted_models():
+    txn, identity = _standardize_inputs({"dist1": [12.0, np.nan], "R_emaildomain": ["gmail.com", None]})
+    identity = identity.assign(**{"id-01": [-5.0], "id-30": ["Windows 10"]})  # test-file style dashed names
+    out = _standardize(txn, identity, is_synthetic=False)
+    for col in ["card1", "card2", "card3", "card5", "addr2", "dist1", "R_emaildomain", "id_01", "id_30"]:
+        assert col in out.columns, col
+    assert out["id_01"].iloc[0] == -5.0 and np.isnan(out["id_01"].iloc[1])
+    assert out["id_30"].iloc[0] == "Windows 10"
 
 
 def test_effective_feature_lists_append_only_present_extension_columns():

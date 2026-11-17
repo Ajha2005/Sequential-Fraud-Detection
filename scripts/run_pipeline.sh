@@ -19,6 +19,9 @@ python3 scripts/phase2_build_sequences.py
 echo "=== Phase 3: baselines ==="
 python3 scripts/phase3_train_baseline.py
 
+echo "=== Phase 3b: stronger XGBoost + no-history ablation ==="
+python3 scripts/phase3b_train_xgb_plus.py
+
 echo "=== Phase 4: LSTM + Transformer ==="
 python3 scripts/phase4_train_deep_models.py
 
@@ -27,6 +30,9 @@ python3 scripts/phase5_fault_fraud.py
 
 echo "=== Phase 6: evaluation & comparison ==="
 python3 scripts/phase6_evaluate.py
+
+echo "=== Phase 6b: same-rows comparison, validation-chosen blend and thresholds ==="
+python3 scripts/phase6b_blend_thresholds.py
 
 echo "=== Phase 7: visualization ==="
 python3 scripts/phase7_visualize.py
