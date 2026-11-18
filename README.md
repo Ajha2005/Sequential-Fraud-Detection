@@ -9,7 +9,7 @@ Dataset: [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detectio
 **Full write-up with results, figures, and honest limitations: [reports/REPORT.md](reports/REPORT.md).**
 **Slide deck outline: [reports/SLIDES.md](reports/SLIDES.md).**
 
-> **Results status.** The numbers in this README and in [reports/REPORT.md](reports/REPORT.md) come from a run on the **real IEEE-CIS data** (590,540 transactions), done in a Kaggle notebook with code version **v5** (commit `d393f9c`). The PNG/JSON/CSV files currently committed under `reports/figures/`, `reports/metrics/` and `reports/samples/`, and `reports/SLIDES.md`, are still from the earlier **synthetic** run and have **not** been replaced yet -- they do not match the numbers in the text until the real-run outputs (the notebook's `reports.zip`) are committed over them. A synthetic stand-in generator (`synthetic.py`) remains for tests and as a fallback when no real CSVs are present.
+> **Results status.** The numbers in this README and in [reports/REPORT.md](reports/REPORT.md) come from a run on the **real IEEE-CIS data** (590,540 transactions), done in a Kaggle notebook with code version **v5** (commit `d393f9c`). The figures, metrics and samples under `reports/` and `reports/SLIDES.md` are from that same run. A synthetic stand-in generator (`synthetic.py`) remains for tests and as a fallback when no real CSVs are present; model checkpoints are gitignored.
 
 ## Architecture
 
@@ -161,12 +161,12 @@ What this does and doesn't show:
 - [x] Trained LSTM fraud model + Transformer stretch goal
 - [x] Trained autoencoder anomaly head + fault/fraud quadrant logic
 - [x] Accuracy/AUC-vs-N curve
-- [x] Annotated per-user prediction traces (fraud, fault, normal cases)
+- [x] Annotated per-user prediction traces (fraud and normal cases; the fault panel is empty on real data, which has no fault labels)
 - [x] Fault/fraud quadrant scatter plot
 - [x] Baseline vs. deep learning vs. published-benchmark comparison chart
 - [x] Confusion matrix + bonus embedding visualization
-- [x] Final written report (updated with real-data results) + slide deck outline (still describes the synthetic run)
+- [x] Final written report + slide deck outline (both updated to the real-data results)
 - [x] Re-run on real Kaggle data (Kaggle notebook, code v5 / commit `d393f9c`)
-- [ ] Commit the real-run figures, metrics and samples from the Kaggle output over the synthetic ones in `reports/`
-- [ ] Update `reports/SLIDES.md` to the real results
-- [ ] Manually review `reports/samples/fault_quadrant_review_sample.csv` (no ground truth for "fault" on real data)
+- [x] Real-run figures, metrics and samples committed under `reports/`
+- [ ] Properly review the Fault quadrant (a first look at the 20 most extreme rows is in the report; a random sample across the score range is still needed -- there is no ground truth for "fault" on real data)
+- [ ] Bootstrap confidence intervals for the model differences

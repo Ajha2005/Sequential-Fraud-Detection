@@ -1,69 +1,65 @@
 # Slide Deck Outline -- Sequential Fault & Fraud Detection
 
-Built around the Phase 7 visualizations so the deck doubles as the demo walkthrough (Phase 8). Each slide lists its figure/table source so it can be dropped straight into slides.
+Built around the Phase 7 visualizations so the deck doubles as the demo walkthrough. Each slide lists its figure/table source. **All numbers are from the run on the real IEEE-CIS data** (code v5, commit `d393f9c`); full detail and caveats are in `reports/REPORT.md`.
 
-**Rehearsed walkthrough order:** architecture -> benchmark comparison -> accuracy-vs-N chart -> fault/fraud quadrant plot -> annotated prediction traces -> attention heatmap.
+**Walkthrough order:** problem -> data -> results (the thesis was not supported) -> why / history ablation -> thresholds -> fault/fraud -> limitations.
 
 ---
 
 ### 1. Title
-Sequential Fault & Fraud Detection -- Predicting Fraud Probability from Evolving Transaction Histories, with Fault/Fraud Separation.
+Sequential Fault & Fraud Detection -- Predicting Fraud Probability from Evolving Transaction Histories, with Fault/Fraud Separation. *Real-data results, including a negative finding.*
 
 ### 2. Problem statement
 - Traditional fraud detection scores transactions in isolation and treats every anomaly as fraud.
-- We model a cardholder's transactions as a sequence and predict fraud probability continuously.
-- We additionally separate flagged transactions into **fraud** (malicious) vs. **fault** (benign anomaly) -- the dataset only labels `isFraud`.
-- Dataset: IEEE-CIS Fraud Detection (Kaggle). *Numbers in this deck are on our synthetic stand-in dataset -- see backup slide.*
+- We hypothesized that modelling a cardholder's transactions as a **sequence** would beat classical ML, and that an anomaly score could separate **fraud** from **fault** (benign anomaly) -- the dataset only labels `isFraud`.
+- Dataset: IEEE-CIS Fraud Detection (Kaggle), 590,540 transactions, 3.5% fraud.
 
 ### 3. Architecture
-- Diagram: raw data -> merge -> feature engineering (causal, per-user) -> padded sequences -> {XGBoost/LogReg baseline} + {LSTM / Transformer fraud head} + {Autoencoder anomaly head} -> fault/fraud quadrant -> evaluation.
-- Source: `README.md` architecture section / `src/sfraud/` package layout.
+- Diagram: raw data -> merge -> feature engineering (causal, per-card) -> {XGBoost/LogReg baselines, XGBoost+ with richer features, LSTM / Transformer, Autoencoder anomaly head} -> fault/fraud quadrant -> evaluation (same rows for every model, thresholds chosen on validation).
+- Source: `README.md` architecture section / `src/sfraud/` layout.
 
-### 4. Data & EDA
-- Class imbalance chart: `reports/figures/eda_class_imbalance.png`
-- Sequence length histogram (justifies max_seq_len=30): `reports/figures/eda_sequence_length_hist.png`
-- Key stat: ~4% fraud rate, 3,000 cards, 92.7k transactions, zero missing values.
+### 4. Data & the card-identity problem
+- Class imbalance: `reports/figures/eda_class_imbalance.png`; history lengths: `reports/figures/eda_sequence_length_hist.png`.
+- No user id in IEEE-CIS: `card_id` = `card1/2/3/5` + account start day `floor(TransactionDT/86400 - D1)`. Candidate keys were compared on the real data (core fields alone gave a 14,112-transaction "card").
+- Result: 161,453 cards; **at least half have one transaction** (median 1, mean 3.7). Split by card in time order; fraud rate 3.05% train -> 4.97% val / 4.54% test.
 
-### 5. Benchmark comparison
-- `reports/figures/plot5_benchmark_comparison.png`
-- Headline: LSTM (0.997 AUC-ROC) and Transformer (0.996) both beat the XGBoost floor (0.991) and the published reference range (0.90-0.93), on synthetic data.
-- One sentence on the synthetic-data caveat -- do not skip this on the actual day.
+### 5. Headline result: the sequence thesis is not supported
+- `reports/figures/plot5_benchmark_comparison.png` (all models on the same 60,182 test rows)
+- XGBoost+ **0.896 AUC / 0.558 PR-AUC**; original XGBoost 0.884 / 0.538; LSTM 0.853 / 0.474; Transformer 0.850 / 0.471; LogReg 0.849 / 0.398.
+- Blend with the LSTM = 0.896 -- adds nothing. The LSTM/Transformer are ~0.04 AUC behind the trees.
+- Say plainly: the published 0.90-0.95 figures use different splits and far heavier modelling -- not directly comparable.
 
-### 6. Accuracy vs. number of transactions seen
-- `reports/figures/plot1_confidence_vs_n.png`
-- Better story slide: history-length stratification table (`reports/metrics/stratify_by_history_length.csv`) -- AUC-ROC climbs from 0.987 (3-5 transactions of history) to 0.9997 (21+) -- direct evidence the model uses history.
+### 6. Does card history help? (ablation)
+- Same XGBoost+ with and without the 20 history features: 0.8956 vs 0.8930 AUC, **0.558 vs 0.567 PR-AUC** -- a wash, probably noise (no confidence intervals yet).
+- The gain over the original XGBoost came from richer raw features, NaN handling and tuning -- not history.
+- `reports/figures/plot1_confidence_vs_n.png`, `reports/metrics/by_history_length_common.csv`: AUC does *not* rise with history for any model.
 
-### 7. Fault vs. fraud quadrant
+### 7. Choosing a threshold matters
+- A fixed 0.5 is meaningless (LSTM recall 0.21 at 0.5).
+- Thresholds chosen on **validation** transfer to test: XGBoost+ at its F1 point = precision 0.58 / recall 0.50; for ~70% recall, precision ~0.28.
+- `reports/figures/plot6_confusion_matrix.png` (blend: 1,350 caught, 1,381 missed, 870 false alarms); `reports/metrics/threshold_table.csv`.
+
+### 8. Fault vs. fraud quadrant
 - `reports/figures/plot3_quadrant_scatter.png`
-- Explain the 2x2: fraud probability (LSTM) x anomaly score (autoencoder) -> Normal / Fault / Fraud / Edge case.
-- Qualitative validation callout: 58.5% of the LSTM's "false positives" are actually synthetic faults, not model errors.
+- 2x2: LSTM fraud probability x autoencoder anomaly score. Test fraud rate by quadrant: Normal 2.4%, **Fault 5.0%**, Edge case 34%, Fraud 57.5% (base rate 4.5%).
+- Be explicit: **no ground truth for "fault"**; the Fault quadrant is 95% non-fraud but is **not validated as benign**. First look at the 20 most extreme rows: whole-dollar amounts repeated on a few cards, anomaly scores in the hundreds-to-thousands.
 
-### 8. Per-user prediction traces
-- `reports/figures/plot2_prediction_traces.png`
-- Walk through the three panels: fraud case (clean spike, annotated), fault case (small bump, stays below threshold), normal case (flat).
+### 9. Interpretability plots (honest)
+- `plot2_prediction_traces.png`: the fault panel is empty on real data, and the example fraud only reaches ~0.24 probability.
+- `plot4_attention_heatmap.png`: attention is diffuse, no peak on the fraud transaction.
+- `plot7_embedding_tsne.png`: categorical embeddings alone do not separate fraud.
 
-### 9. Attention heatmap (interpretability)
-- `reports/figures/plot4_attention_heatmap.png`
-- Same fraud-case card as slide 8: the Transformer's last-layer attention peaks exactly on the first fraudulent transaction in the burst when predicting the rest of it.
+### 10. Limitations
+- `card_id` is an approximation (>= half the cards are single transactions; a 1,414-transaction card likely merges accounts).
+- LSTM/Transformer are **untuned** (15 epochs, default hyperparameters) and see only each card's first 30 transactions -- the negative result is for this setup, not a proof sequence models cannot help.
+- No confidence intervals; single seed; temporal fraud-rate shift; autoencoder validation loss ~300x training loss (extreme feature values suspected, untested).
 
-### 10. Confusion matrix + bonus embedding plot
-- `reports/figures/plot6_confusion_matrix.png`
-- `reports/figures/plot7_embedding_tsne.png` (bonus) -- categorical embeddings alone give partial, not clean, separation; most signal comes from the personalized amount/time deviation features.
-
-### 11. Limitations
-- Synthetic stand-in data (biggest caveat -- say it plainly).
-- `card_id` and `merchant_category` are documented heuristics for real IEEE-CIS data.
-- Autoencoder is per-transaction, not per-sequence.
-- Fault recovery rate is modest (16%) at the current threshold -- faults are subtle by design.
+### 11. Next steps
+- Bootstrap confidence intervals; tune the deep models; clip heavy-tailed features.
+- Causal aggregates across other entities (`card1`, `addr1`, email domain), not just same-card history.
+- Properly review a random sample of the Fault quadrant.
 
 ### 12. Team & deliverables checklist
 - Member A: data pipeline, sequence construction, baselines.
 - Member B: LSTM/Transformer, autoencoder, evaluation, visualization.
-- Checklist from `README.md` -- all boxes checked on synthetic data, real-data run pending Kaggle credentials.
-
----
-
-### Backup slide: synthetic data disclaimer (keep ready, use if asked)
-- Kaggle requires authenticated download; this environment/CI has no such access.
-- `src/sfraud/data/synthetic.py` generates a dataset with the *exact same schema* as the real one, so swapping in the real CSVs requires zero code changes.
-- All absolute metrics should be re-validated on real data before being quoted outside this project.
+- Checklist from `README.md`.

@@ -1,14 +1,23 @@
 {
-  "n_rows": 92621,
-  "n_cards": 3000,
-  "fraud_rate": 0.039494283153928375,
-  "missing_values": {},
-  "data_source": "synthetic",
+  "n_rows": 590540,
+  "n_cards": 161453,
+  "fraud_rate": 0.03499000914417313,
+  "missing_values": {
+    "card_category": 1571,
+    "addr1": 65706
+  },
+  "wide_columns_missing": {
+    "n_columns": 414,
+    "n_columns_with_missing": 399,
+    "mean_missing_fraction": 0.45722830606687825,
+    "max_missing_fraction": 0.9919615944728554
+  },
+  "data_source": "real_kaggle",
   "seq_len_stats": {
-    "mean": 30.873666666666665,
-    "median": 31.0,
-    "p90": 55.0,
-    "p95": 57.0,
-    "max": 60
+    "mean": 3.6576588852483387,
+    "median": 1.0,
+    "p90": 8.0,
+    "p95": 13.0,
+    "max": 1414
   }
 }
