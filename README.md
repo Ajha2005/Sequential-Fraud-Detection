@@ -90,6 +90,7 @@ python3 scripts/phase5_fault_fraud.py        # Phase 5: autoencoder anomaly head
 python3 scripts/phase6_evaluate.py           # Phase 6: benchmark comparison, accuracy-vs-N, stratification, error analysis
 python3 scripts/phase6b_blend_thresholds.py  # Phase 6b: same-rows comparison, validation-chosen blend and thresholds
 python3 scripts/phase7_visualize.py          # Phase 7: all plots
+python3 scripts/review_fault_quadrant.py     # Optional, after Phase 5: characterize the Fault quadrant on real data + a stratified random sample for manual review
 ```
 
 ### What Phases 3b and 6b add
