@@ -1,5 +1,5 @@
 {
-  "note": "Values transcribed from the printed output of the Fault-review run on the real data (v5 code, commit c433778); the band table is rounded to 3 decimals. Computed over val+test rows.",
+  "note": "Values transcribed from the printed output of the Fault-review run on the real data (v5 code, commit 5404707); the band table is rounded to 3 decimals. Computed over val+test rows.",
   "n_fault_rows": 11687,
   "n_distinct_cards_in_fault": 6434,
   "top10_cards_share_of_fault_rows": 0.017284161889278685,

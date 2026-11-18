@@ -3,7 +3,7 @@
 *Predicting fraud probability from evolving transaction histories, with fault/fraud separation.*
 
 > **Read this first.**
-> - **Data and code:** every number in this report comes from one run of the full pipeline on the **real IEEE-CIS Fraud Detection data** (590,540 transactions), in a CPU-only Kaggle notebook, with code version **v5** (commit `d393f9c`).
+> - **Data and code:** every number in this report comes from one run of the full pipeline on the **real IEEE-CIS Fraud Detection data** (590,540 transactions), in a CPU-only Kaggle notebook, with code version **v5** (commit `0b13e61`).
 > - **Headline:** on this data, sequence models do **not** beat gradient-boosted trees. Trees with richer features are the best models, adding card-history features to them did not help, and the LSTM/Transformer are behind (Sections 1, 4 and 6).
 > - **Artifacts:** the figures, metrics and samples under `reports/` are the outputs of this same run and match the numbers below (model checkpoints are gitignored and not committed).
 > - **Statistical caution:** bootstrap 95% intervals (resampling test cards, Section 6.1) separate real differences from noise: XGBoost+ over the original XGBoost, and the boosted model over the LSTM, are real; the blend over XGBoost+ is not. The intervals cover test-sampling noise only, not training randomness (single run, single seed).

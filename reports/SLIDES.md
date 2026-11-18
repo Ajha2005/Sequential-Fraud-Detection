@@ -1,6 +1,6 @@
 # Slide Deck Outline -- Sequential Fault & Fraud Detection
 
-Built around the Phase 7 visualizations so the deck doubles as the demo walkthrough. Each slide lists its figure/table source. **All numbers are from the run on the real IEEE-CIS data** (code v5, commit `d393f9c`); full detail and caveats are in `reports/REPORT.md`.
+Built around the Phase 7 visualizations so the deck doubles as the demo walkthrough. Each slide lists its figure/table source. **All numbers are from the run on the real IEEE-CIS data** (code v5, commit `0b13e61`); full detail and caveats are in `reports/REPORT.md`.
 
 **Walkthrough order:** research questions -> data -> results (sequence models do not beat boosted trees) -> why / history ablation -> thresholds -> fault/fraud -> limitations.
 
