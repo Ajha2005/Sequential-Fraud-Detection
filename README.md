@@ -2,7 +2,7 @@
 
 Predicting fraud probability from evolving transaction histories, with fault/fraud separation.
 
-Traditional fraud detection scores each transaction in isolation and treats every anomaly as fraud. This project instead models a cardholder's transactions as an ordered **sequence** (LSTM, with a Transformer variant for comparison), predicting fraud probability continuously as new transactions arrive, and separates flagged transactions into **fraud** (malicious) vs. **fault** (a non-malicious anomaly -- a technical error, a mistyped detail, a legitimate but unusual purchase) using a combined supervised + anomaly-detection design.
+Fraud models usually score each transaction in isolation and treat every anomaly as fraud. This project asks whether a cardholder's **transaction history** helps: it compares sequence models (an LSTM, with a Transformer variant) against gradient-boosted trees with and without history features, on the real IEEE-CIS data under a like-for-like evaluation, and explores separating flagged transactions into **fraud** (malicious) vs. **fault** (a non-malicious anomaly -- a technical error, a mistyped detail, a legitimate but unusual purchase) with a combined supervised + anomaly-detection design. On the real data the sequence models do not beat the boosted trees; the write-up reports the results and the reasons we could and could not establish.
 
 Dataset: [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detection) (Kaggle, public).
 
@@ -142,7 +142,7 @@ On the **real IEEE-CIS data** (full details and every caveat in [reports/REPORT.
 
 What this does and doesn't show:
 
-- **The original thesis is not supported on real data.** The sequence models do not beat gradient-boosted trees: the LSTM is about 0.04 AUC behind XGBoost+, and a blend with the LSTM adds essentially nothing (0.8957 vs 0.8956 AUC). (On the earlier synthetic data the LSTM was best -- that was a property of the synthetic generator, not of real fraud.)
+- **Sequence models do not beat boosted trees on this data.** The LSTM is about 0.04 AUC behind XGBoost+, and a blend with the LSTM adds essentially nothing (0.8957 vs 0.8956 AUC). (On the earlier synthetic data the LSTM was best -- that was a property of the synthetic generator, not of real fraud.)
 - **Card history did not help the boosted model.** XGBoost+ with history is +0.003 AUC but -0.009 PR-AUC versus the same model without it -- a wash, and probably within noise (differences were not yet tested with confidence intervals). The gain over the original XGBoost (+0.012 AUC, +0.02-0.03 PR-AUC) came from richer raw features, NaN handling and tuning, not from history.
 - **Thresholds matter.** At a fixed 0.5 the LSTM catches only ~21% of fraud. With a threshold chosen on validation (F1-optimal), XGBoost+ reaches test precision 0.58 / recall 0.50 (F1 0.54); asking for ~70% recall costs precision (~0.28).
 - **Card identity is approximate.** IEEE-CIS has no user id; of the 161,453 derived cards at least half have a single transaction (median history 1, mean 3.7), which limits what any sequence model can learn.

@@ -4,16 +4,29 @@
 
 > **Read this first.**
 > - **Data and code:** every number in this report comes from one run of the full pipeline on the **real IEEE-CIS Fraud Detection data** (590,540 transactions), in a CPU-only Kaggle notebook, with code version **v5** (commit `d393f9c`).
-> - **Headline:** the project's original thesis -- that a sequence model beats classical ML by using card history -- is **not supported** on the real data. Gradient-boosted trees with richer features are the best models, adding card-history features to them did not help, and the LSTM/Transformer are behind (Sections 4 and 6).
+> - **Headline:** on this data, sequence models do **not** beat gradient-boosted trees. Trees with richer features are the best models, adding card-history features to them did not help, and the LSTM/Transformer are behind (Sections 1, 4 and 6).
 > - **Artifacts:** the figures, metrics and samples under `reports/` are the outputs of this same run and match the numbers below (model checkpoints are gitignored and not committed).
 > - **Statistical caution:** no confidence intervals have been computed yet. Differences of about 0.01 AUC-ROC or PR-AUC between models should not be over-read (Section 7).
 
-## 1. Problem statement
+## 1. Problem statement and research questions
 
-Traditional fraud detection scores each transaction in isolation and treats every anomaly as fraud. This project set out to:
+Fraud models usually score each transaction in isolation and treat every anomaly as fraud. A cardholder's earlier transactions could in principle help (velocity, category drift, deviation from the user's own baseline), and some flagged transactions may be harmless oddities ("faults": a technical error, a mistyped detail, a legitimate but unusual purchase) rather than fraud. On the real IEEE-CIS data, with an evaluation designed to be fair, this project asks:
 
-1. model a cardholder's transactions as an ordered **sequence**, predicting a fraud probability that updates as each new transaction arrives, so the model can use velocity, category drift, and deviation from the user's own baseline -- signals a single-transaction model cannot see;
-2. separate flagged transactions into **fraud** (malicious) vs. **fault** (a non-malicious anomaly: a technical error, a mistyped detail, a legitimate but unusual purchase) using a combined supervised + anomaly-detection design, since the dataset only labels `isFraud` and "fault" has no ground truth at all.
+1. **Does sequence modelling help?** Do an LSTM and a Transformer over a card's history beat classical models on the same transactions?
+2. **Does card history help at all?** Does the same boosted-tree model do better with history-derived features than without them?
+3. **What matters most for accuracy?** Richer features, missing-value handling, tuning, or the choice of decision threshold?
+4. **Can "fault" be separated from fraud** with a combined supervised + anomaly-detection design, given that the dataset only labels `isFraud` and "fault" has no ground truth?
+
+The evaluation is built to answer them fairly: identical rows for every model, a history ablation, and thresholds chosen on validation rather than on test.
+
+**Answers in brief** (under these conditions: approximate card ids, untuned deep models, a single run, no confidence intervals):
+
+| Question | Answer | Evidence |
+|---|---|---|
+| 1. Does sequence modelling help? | No -- the LSTM (0.853 AUC) and Transformer (0.850) trail XGBoost+ (0.896) | Section 4 |
+| 2. Does card history help? | Not measurably -- with vs. without history is +0.003 AUC, -0.009 PR-AUC | Section 6.1 |
+| 3. What matters most? | Richer raw features, NaN handling and tuning (about +0.012 AUC over the original XGBoost); and the threshold (the LSTM catches ~21% of fraud at 0.5, ~43% at its validation-chosen threshold) | Sections 4 and 6 |
+| 4. Can fault be separated from fraud? | Only weakly -- the anomaly score about doubles the fraud rate (5.0% vs 2.4%), but the "Fault" quadrant is 95% non-fraud and not validated as benign | Section 5 |
 
 ## 2. Dataset
 

@@ -2,16 +2,17 @@
 
 Built around the Phase 7 visualizations so the deck doubles as the demo walkthrough. Each slide lists its figure/table source. **All numbers are from the run on the real IEEE-CIS data** (code v5, commit `d393f9c`); full detail and caveats are in `reports/REPORT.md`.
 
-**Walkthrough order:** problem -> data -> results (the thesis was not supported) -> why / history ablation -> thresholds -> fault/fraud -> limitations.
+**Walkthrough order:** research questions -> data -> results (sequence models do not beat boosted trees) -> why / history ablation -> thresholds -> fault/fraud -> limitations.
 
 ---
 
 ### 1. Title
-Sequential Fault & Fraud Detection -- Predicting Fraud Probability from Evolving Transaction Histories, with Fault/Fraud Separation. *Real-data results, including a negative finding.*
+Does Transaction History Help Detect Fraud? A Like-for-Like Evaluation of Sequence Models and Boosted Trees on IEEE-CIS, with an Exploration of Fault/Fraud Separation. *Real-data results, including a negative finding.*
 
-### 2. Problem statement
-- Traditional fraud detection scores transactions in isolation and treats every anomaly as fraud.
-- We hypothesized that modelling a cardholder's transactions as a **sequence** would beat classical ML, and that an anomaly score could separate **fraud** from **fault** (benign anomaly) -- the dataset only labels `isFraud`.
+### 2. Research questions
+- Fraud models usually score transactions in isolation and treat every anomaly as fraud.
+- Q1: Does sequence modelling (LSTM / Transformer over a card's history) beat classical models? Q2: Does card history help at all (same model with vs. without history features)? Q3: What matters most -- features, tuning, or thresholds? Q4: Can **fault** (benign anomaly) be separated from fraud when only `isFraud` is labelled?
+- The evaluation is built to answer these fairly: identical rows for every model, a history ablation, thresholds chosen on validation.
 - Dataset: IEEE-CIS Fraud Detection (Kaggle), 590,540 transactions, 3.5% fraud.
 
 ### 3. Architecture
@@ -23,7 +24,7 @@ Sequential Fault & Fraud Detection -- Predicting Fraud Probability from Evolving
 - No user id in IEEE-CIS: `card_id` = `card1/2/3/5` + account start day `floor(TransactionDT/86400 - D1)`. Candidate keys were compared on the real data (core fields alone gave a 14,112-transaction "card").
 - Result: 161,453 cards; **at least half have one transaction** (median 1, mean 3.7). Split by card in time order; fraud rate 3.05% train -> 4.97% val / 4.54% test.
 
-### 5. Headline result: the sequence thesis is not supported
+### 5. Headline result (Q1): sequence models do not beat boosted trees
 - `reports/figures/plot5_benchmark_comparison.png` (all models on the same 60,182 test rows)
 - XGBoost+ **0.896 AUC / 0.558 PR-AUC**; original XGBoost 0.884 / 0.538; LSTM 0.853 / 0.474; Transformer 0.850 / 0.471; LogReg 0.849 / 0.398.
 - Blend with the LSTM = 0.896 -- adds nothing. The LSTM/Transformer are ~0.04 AUC behind the trees.
