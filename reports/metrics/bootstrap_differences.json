@@ -1,0 +1,62 @@
+{
+  "note": "Bootstrap over test CARDS (a card's transactions are resampled together), 200 resamples, seed 0, on the 60,182 common test rows. Values transcribed from the notebook output. The interval reflects test-sampling noise only (models fixed; no retraining or seed variation).",
+  "n_resamples": 200,
+  "differences": [
+    {
+      "a": "xgboost_plus",
+      "b": "xgboost_plus_nohist",
+      "auc_mean": 0.0026,
+      "auc_ci": [
+        -0.0006,
+        0.0059
+      ],
+      "pr_mean": -0.0092,
+      "pr_ci": [
+        -0.0156,
+        -0.0017
+      ]
+    },
+    {
+      "a": "xgboost_plus",
+      "b": "xgboost",
+      "auc_mean": 0.012,
+      "auc_ci": [
+        0.0073,
+        0.0174
+      ],
+      "pr_mean": 0.0202,
+      "pr_ci": [
+        0.0084,
+        0.0303
+      ]
+    },
+    {
+      "a": "blend",
+      "b": "xgboost_plus",
+      "auc_mean": 0.0001,
+      "auc_ci": [
+        -0.0011,
+        0.0015
+      ],
+      "pr_mean": 0.0024,
+      "pr_ci": [
+        -0.0002,
+        0.0059
+      ]
+    },
+    {
+      "a": "xgboost_plus",
+      "b": "lstm",
+      "auc_mean": 0.0427,
+      "auc_ci": [
+        0.0338,
+        0.0509
+      ],
+      "pr_mean": 0.083,
+      "pr_ci": [
+        0.065,
+        0.0992
+      ]
+    }
+  ]
+}

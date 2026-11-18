@@ -1,0 +1,104 @@
+{
+  "note": "Values transcribed from the printed output of the Fault-review run on the real data (v5 code, commit c433778); the band table is rounded to 3 decimals. Computed over val+test rows.",
+  "n_fault_rows": 11687,
+  "n_distinct_cards_in_fault": 6434,
+  "top10_cards_share_of_fault_rows": 0.017284161889278685,
+  "fraud_rate_fault": 0.061350218191152564,
+  "fraud_rate_normal_sample": 0.0251,
+  "max_abs_z": {
+    "fault_median": 11.804405212402344,
+    "normal_median": 3.0633857250213623,
+    "fault_p90": 25.075821304321277,
+    "normal_p90": 5.9995408058166655,
+    "share_fault_gt_5": 0.9648327201163687,
+    "share_fault_gt_10": 0.667065970736716,
+    "share_fault_gt_50": 0.009668862839051938,
+    "share_normal_gt_5": 0.1745,
+    "share_normal_gt_10": 0.0111,
+    "share_normal_gt_50": 0.0
+  },
+  "amount": {
+    "fault_median": 72.99,
+    "normal_median": 67.95,
+    "fault_p90": 527.0,
+    "normal_p90": 303.1878997802775
+  },
+  "most_common_top_feature_in_fault": {
+    "D14": 448,
+    "D7": 416,
+    "V300": 352,
+    "V108": 342,
+    "V107": 341,
+    "V313": 336,
+    "V114": 329,
+    "V146": 301,
+    "V141": 292,
+    "D12": 284
+  },
+  "ProductCD_share_fault": {
+    "W": 0.469,
+    "C": 0.275,
+    "R": 0.12,
+    "S": 0.078,
+    "H": 0.059
+  },
+  "ProductCD_share_normal": {
+    "W": 0.762,
+    "C": 0.128,
+    "R": 0.057,
+    "H": 0.042,
+    "S": 0.011
+  },
+  "bands": [
+    {
+      "band": "0-50%",
+      "rows": 5844,
+      "score_min": 0.518,
+      "score_max": 0.882,
+      "fraud_rate": 0.058,
+      "median_amount": 59.0,
+      "median_max_abs_z": 9.615,
+      "share_maxz_gt10": 0.452
+    },
+    {
+      "band": "50-80%",
+      "rows": 3505,
+      "score_min": 0.882,
+      "score_max": 1.961,
+      "fraud_rate": 0.071,
+      "median_amount": 78.571,
+      "median_max_abs_z": 12.61,
+      "share_maxz_gt10": 0.811
+    },
+    {
+      "band": "80-95%",
+      "rows": 1753,
+      "score_min": 1.962,
+      "score_max": 7.028,
+      "fraud_rate": 0.056,
+      "median_amount": 97.0,
+      "median_max_abs_z": 22.462,
+      "share_maxz_gt10": 0.984
+    },
+    {
+      "band": "95-99%",
+      "rows": 468,
+      "score_min": 7.029,
+      "score_max": 16.587,
+      "fraud_rate": 0.058,
+      "median_amount": 77.0,
+      "median_max_abs_z": 45.821,
+      "share_maxz_gt10": 1.0
+    },
+    {
+      "band": "99-100%",
+      "rows": 117,
+      "score_min": 16.63,
+      "score_max": 4827.458,
+      "fraud_rate": 0.017,
+      "median_amount": 200.0,
+      "median_max_abs_z": 76.08,
+      "share_maxz_gt10": 1.0
+    }
+  ]
+}

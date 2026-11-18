@@ -31,7 +31,8 @@ Does Transaction History Help Detect Fraud? A Like-for-Like Evaluation of Sequen
 - Say plainly: the published 0.90-0.95 figures use different splits and far heavier modelling -- not directly comparable.
 
 ### 6. Does card history help? (ablation)
-- Same XGBoost+ with and without the 20 history features: 0.8956 vs 0.8930 AUC, **0.558 vs 0.567 PR-AUC** -- a wash, probably noise (no confidence intervals yet).
+- Same XGBoost+ with and without the 20 history features: 0.8956 vs 0.8930 AUC (+0.003, bootstrap 95% CI -0.001 to +0.006: noise), **0.558 vs 0.567 PR-AUC** (-0.009, CI -0.016 to -0.002: slightly *worse* with history). No gain from history.
+- Bootstrap intervals (resampling test cards): XGBoost+ beats the original XGBoost (+0.012 AUC, CI +0.007 to +0.017) and the LSTM (+0.043 AUC, CI +0.034 to +0.051); the blend adds nothing (CI includes zero). Intervals cover test noise only.
 - The gain over the original XGBoost came from richer raw features, NaN handling and tuning -- not history.
 - `reports/figures/plot1_confidence_vs_n.png`, `reports/metrics/by_history_length_common.csv`: AUC does *not* rise with history for any model.
 
@@ -43,7 +44,8 @@ Does Transaction History Help Detect Fraud? A Like-for-Like Evaluation of Sequen
 ### 8. Fault vs. fraud quadrant
 - `reports/figures/plot3_quadrant_scatter.png`
 - 2x2: LSTM fraud probability x autoencoder anomaly score. Test fraud rate by quadrant: Normal 2.4%, **Fault 5.0%**, Edge case 34%, Fraud 57.5% (base rate 4.5%).
-- Be explicit: **no ground truth for "fault"**; the Fault quadrant is 95% non-fraud but is **not validated as benign**. First look at the 20 most extreme rows: whole-dollar amounts repeated on a few cards, anomaly scores in the hundreds-to-thousands.
+- Be explicit: **no ground truth for "fault"**; the Fault quadrant is ~94% non-fraud and is **not validated as benign**.
+- Measured over all 11,687 Fault rows: **96.5% have a feature beyond 5 standard deviations** (Normal rows: 17.5%); two-thirds beyond 10. The anomaly score mostly measures *extreme anonymised feature values*. Fraud rate 6.1% vs 2.5% (Normal), but flat across score bands and only 1.7% in the top 1% -- the most extreme rows are almost all non-fraud outliers.
 
 ### 9. Interpretability plots (honest)
 - `plot2_prediction_traces.png`: the fault panel is empty on real data, and the example fraud only reaches ~0.24 probability.
@@ -53,12 +55,12 @@ Does Transaction History Help Detect Fraud? A Like-for-Like Evaluation of Sequen
 ### 10. Limitations
 - `card_id` is an approximation (>= half the cards are single transactions; a 1,414-transaction card likely merges accounts).
 - LSTM/Transformer are **untuned** (15 epochs, default hyperparameters) and see only each card's first 30 transactions -- the negative result is for this setup, not a proof sequence models cannot help.
-- No confidence intervals; single seed; temporal fraud-rate shift; autoencoder validation loss ~300x training loss (extreme feature values suspected, untested).
+- Single run and seed (bootstrap intervals cover test noise only); temporal fraud-rate shift; autoencoder validation loss ~300x training loss, consistent with extreme feature values driving the anomaly scores (clipping not tried).
 
 ### 11. Next steps
-- Bootstrap confidence intervals; tune the deep models; clip heavy-tailed features.
+- Tune the deep models; clip heavy-tailed features (then re-test the anomaly score); repeat runs over several seeds.
 - Causal aggregates across other entities (`card1`, `addr1`, email domain), not just same-card history.
-- Properly review a random sample of the Fault quadrant.
+- Manually label the 60-row stratified Fault sample (drawn, not yet reviewed).
 
 ### 12. Team & deliverables checklist
 - Member A: data pipeline, sequence construction, baselines.
