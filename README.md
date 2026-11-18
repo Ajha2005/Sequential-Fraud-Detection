@@ -9,7 +9,7 @@ Dataset: [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detectio
 **Full write-up with results, figures, and honest limitations: [reports/REPORT.md](reports/REPORT.md).**
 **Slide deck outline: [reports/SLIDES.md](reports/SLIDES.md).**
 
-> This repository has no Kaggle credentials attached to it, so every result currently in `reports/` was generated on a **synthetic stand-in dataset** with the same schema as the real one (see [Plugging in the real Kaggle dataset](#plugging-in-the-real-kaggle-dataset)). The code path is identical either way -- only the data source changes.
+> **Results status.** The numbers in this README and in [reports/REPORT.md](reports/REPORT.md) come from a run on the **real IEEE-CIS data** (590,540 transactions), done in a Kaggle notebook with code version **v5** (commit `d393f9c`). The PNG/JSON/CSV files currently committed under `reports/figures/`, `reports/metrics/` and `reports/samples/`, and `reports/SLIDES.md`, are still from the earlier **synthetic** run and have **not** been replaced yet -- they do not match the numbers in the text until the real-run outputs (the notebook's `reports.zip`) are committed over them. A synthetic stand-in generator (`synthetic.py`) remains for tests and as a fallback when no real CSVs are present.
 
 ## Architecture
 
@@ -128,16 +128,24 @@ Covers: causal feature engineering (no leakage into a transaction's own history)
 
 ## Results summary
 
-On the synthetic stand-in dataset (full details, all 8 plots, and every caveat in [reports/REPORT.md](reports/REPORT.md)):
+On the **real IEEE-CIS data** (full details and every caveat in [reports/REPORT.md](reports/REPORT.md)). Every model is scored on the same 60,182 test transactions (2,731 fraud, 4.5%); the split is by card in time order, so train precedes val/test:
 
 | Model | Test AUC-ROC | Test PR-AUC |
 |---|---|---|
-| Logistic Regression | 0.984 | 0.896 |
-| XGBoost | 0.989 | 0.927 |
-| **LSTM** | **0.995** | **0.961** |
-| Transformer | 0.991 | 0.943 |
+| Logistic Regression | 0.849 | 0.398 |
+| XGBoost (original baseline) | 0.884 | 0.538 |
+| XGBoost+ (no history features) | 0.893 | **0.567** |
+| **XGBoost+ (with history features)** | **0.896** | 0.558 |
+| LSTM | 0.853 | 0.474 |
+| Transformer | 0.850 | 0.471 |
+| Blend (0.85 XGBoost+ + 0.15 LSTM) | 0.896 | 0.560 |
 
-Both sequence models beat the classical XGBoost baseline, and AUC-ROC on the LSTM climbs from 0.991 (users with 3-5 transactions of history) to 0.998 (21+) -- direct evidence the model benefits from longer histories, which is the core thesis of the project.
+What this does and doesn't show:
+
+- **The original thesis is not supported on real data.** The sequence models do not beat gradient-boosted trees: the LSTM is about 0.04 AUC behind XGBoost+, and a blend with the LSTM adds essentially nothing (0.8957 vs 0.8956 AUC). (On the earlier synthetic data the LSTM was best -- that was a property of the synthetic generator, not of real fraud.)
+- **Card history did not help the boosted model.** XGBoost+ with history is +0.003 AUC but -0.009 PR-AUC versus the same model without it -- a wash, and probably within noise (differences were not yet tested with confidence intervals). The gain over the original XGBoost (+0.012 AUC, +0.02-0.03 PR-AUC) came from richer raw features, NaN handling and tuning, not from history.
+- **Thresholds matter.** At a fixed 0.5 the LSTM catches only ~21% of fraud. With a threshold chosen on validation (F1-optimal), XGBoost+ reaches test precision 0.58 / recall 0.50 (F1 0.54); asking for ~70% recall costs precision (~0.28).
+- **Card identity is approximate.** IEEE-CIS has no user id; of the 161,453 derived cards at least half have a single transaction (median history 1, mean 3.7), which limits what any sequence model can learn.
 
 ## Team split (from the blueprint)
 
@@ -157,5 +165,8 @@ Both sequence models beat the classical XGBoost baseline, and AUC-ROC on the LST
 - [x] Fault/fraud quadrant scatter plot
 - [x] Baseline vs. deep learning vs. published-benchmark comparison chart
 - [x] Confusion matrix + bonus embedding visualization
-- [x] Final written report + slide deck outline
-- [ ] Re-run on real Kaggle data (requires Kaggle credentials this environment doesn't have -- see above)
+- [x] Final written report (updated with real-data results) + slide deck outline (still describes the synthetic run)
+- [x] Re-run on real Kaggle data (Kaggle notebook, code v5 / commit `d393f9c`)
+- [ ] Commit the real-run figures, metrics and samples from the Kaggle output over the synthetic ones in `reports/`
+- [ ] Update `reports/SLIDES.md` to the real results
+- [ ] Manually review `reports/samples/fault_quadrant_review_sample.csv` (no ground truth for "fault" on real data)

@@ -2,69 +2,88 @@
 
 *Predicting fraud probability from evolving transaction histories, with fault/fraud separation.*
 
-> **Read this first:** every number in this report was produced by running the full pipeline end to end on the **synthetic stand-in dataset** described below, not on the real Kaggle data (this environment has no network access to Kaggle). The code, architecture, and evaluation methodology are exactly what would run against the real IEEE-CIS CSVs -- see [README.md](../README.md#plugging-in-the-real-kaggle-dataset) for how to swap them in. Treat the absolute numbers here as a proof that the pipeline works end to end, not as a claim about real-world fraud-detection accuracy.
+> **Read this first.**
+> - **Data and code:** every number in this report comes from one run of the full pipeline on the **real IEEE-CIS Fraud Detection data** (590,540 transactions), in a CPU-only Kaggle notebook, with code version **v5** (commit `d393f9c`).
+> - **Headline:** the project's original thesis -- that a sequence model beats classical ML by using card history -- is **not supported** on the real data. Gradient-boosted trees with richer features are the best models, adding card-history features to them did not help, and the LSTM/Transformer are behind (Sections 4 and 6).
+> - **Files vs. text:** the PNG/JSON/CSV files currently committed under `reports/figures/`, `reports/metrics/` and `reports/samples/` are still from the earlier **synthetic** run and do not match the numbers below until the real-run outputs from the Kaggle notebook are committed over them. The figures are not embedded or described here for that reason. The Kaggle output also holds the real-run versions of plots 1-7, which are not reviewed in this report.
+> - **Statistical caution:** no confidence intervals have been computed yet. Differences of about 0.01 AUC-ROC or PR-AUC between models should not be over-read (Section 7).
 
 ## 1. Problem statement
 
-Traditional fraud detection scores each transaction in isolation and treats every anomaly as fraud. This project instead:
+Traditional fraud detection scores each transaction in isolation and treats every anomaly as fraud. This project set out to:
 
-1. models a cardholder's transactions as an ordered **sequence**, predicting a fraud probability that updates as each new transaction arrives, so the model can use velocity, category drift, and deviation from the user's own baseline -- signals a single-transaction model cannot see;
-2. separates flagged transactions into **fraud** (malicious) vs. **fault** (a non-malicious anomaly: a technical error, a mistyped detail, a legitimate but unusual purchase) using a combined supervised + anomaly-detection design, since the dataset only labels `isFraud` and "fault" has no ground truth at all.
+1. model a cardholder's transactions as an ordered **sequence**, predicting a fraud probability that updates as each new transaction arrives, so the model can use velocity, category drift, and deviation from the user's own baseline -- signals a single-transaction model cannot see;
+2. separate flagged transactions into **fraud** (malicious) vs. **fault** (a non-malicious anomaly: a technical error, a mistyped detail, a legitimate but unusual purchase) using a combined supervised + anomaly-detection design, since the dataset only labels `isFraud` and "fault" has no ground truth at all.
 
 ## 2. Dataset
 
-**Target dataset:** [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detection) (Kaggle, public). It ships as two tables (`train_transaction.csv`, `train_identity.csv`) joined on `TransactionID`, with a binary `isFraud` label, ~3.5% positive rate, and no explicit user/card identifier.
+**Dataset:** [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detection) (Kaggle, public): `train_transaction.csv` and `train_identity.csv`, joined on `TransactionID`, binary `isFraud` label, and no explicit user/card identifier.
 
-**Synthetic stand-in used for this run:** `src/sfraud/data/synthetic.py` generates two tables in the *exact same shape* (same columns, same join key), so `src/sfraud/data/merge.py` and everything downstream is byte-for-byte the same code path whether it reads the real CSVs or the synthetic ones. The generator:
+**This run:** 590,540 transactions, fraud rate **3.50%**. Missing values: `card_category` 1,571, `addr1` 65,706. Of the 414 extension and extra raw columns (C/D/V, identity fields, distances, ...), 399 have missing values (mean missing fraction 45.7%, max 99.2%).
 
-- gives each of 3,000 synthetic cardholders a stable baseline (typical spend, product, device, email, address);
-- injects fraud as a **regime shift partway through a card's history** (account takeover), in short bursts, with amount/category/device drift away from that user's baseline;
-- separately injects a milder **fault** shift (benign anomaly -- a legitimate but unusual purchase, a new device) into a subset of non-fraud transactions, tagged with `synthetic_fault_flag`. This flag only exists because we control the generator -- it is never a model input, only a way to check the fault-detection *method* against a known answer (see Section 5).
+**Cards are derived, not given.** IEEE-CIS has no user id, so `card_id` is a heuristic: `card1, card2, card3, card5` plus the account start day `floor(TransactionDT/86400 - D1)` (`src/sfraud/data/merge.py`, `_derive_card_id`). The candidate keys were compared on this data -- `card1/2/3/5` alone produced a 14,112-transaction "card" (an issuer/product bucket, not a person), and adding `addr1` over-fragments because it is blank on ~11% of rows. The chosen key gives:
 
-Resulting dataset (this run): **92,621 transactions across 3,000 cards**, fraud rate **3.95%** (config target ~3.5%, matching Section 2 of the blueprint), zero missing values by construction. Per-card sequence length: mean 30.9, median 31, p90 55 (`reports/figures/eda_sequence_length_hist.png`) -- which is why `max_seq_len=30` was chosen (`configs/config.yaml`): it covers the bulk of the distribution while keeping the padded tensors small.
+- **161,453 cards**: 149,167 "real" cards plus 12,286 rows missing a core field or `D1`, each treated as its own single-transaction card;
+- history length per card: mean 3.66, **median 1**, p90 8, p95 13, max 1,414;
+- among the 149,167 real cards: median 2, p90 9, p99 32; the 10 largest cards hold 0.7% of rows.
 
-![Class imbalance](figures/eda_class_imbalance.png)
+So **at least half of all cards have a single transaction**, which limits how much any sequence model can exploit. This is an approximation -- there is no ground truth for who is who (Section 7).
+
+A synthetic stand-in generator (`src/sfraud/data/synthetic.py`) produces the same schema and is used for tests and as a fallback when no real CSVs are present. It was used for the earlier development runs and is not used for any number in this report.
 
 ## 3. Methodology
 
-### 3.1 Feature engineering (`src/sfraud/features/engineering.py`)
+### 3.1 Features
 
-Every numeric feature that depends on a card's own history is computed **causally** -- at transaction *t* it only uses transactions 1..*t*-1 for that card (`groupby().expanding().shift(1)`), so the model never gets to peek at its own contribution to "the user's typical behavior":
+**Shared per-transaction features** (`src/sfraud/features/engineering.py`). Every feature that depends on a card's own history is **causal** -- at transaction *t* it only uses transactions 1..*t*-1 for that card:
 
 | Feature | Meaning |
 |---|---|
 | `log_amt`, `log_time_delta` | log1p of amount and of seconds since the card's previous transaction |
-| `amt_dev`, `amt_zscore` | current `log_amt` vs. the causal expanding mean/std of the card's *prior* amounts -- "rolling average spend" deviation |
+| `amt_dev`, `amt_zscore` | current `log_amt` vs. the causal expanding mean/std of the card's *prior* amounts |
 | `txn_hour`, `txn_dow` | time-of-day / day-of-week |
-| `stab_ProductCD`, `stab_device_type`, `stab_email_domain` | does this transaction match the card's most common *prior* value for that field? (1 = stable, 0 = just switched) -- a personalized-baseline signal for *categorical* drift, mirroring what `amt_dev` does for amount |
+| `stab_ProductCD`, `stab_device_type`, `stab_email_domain` | does this transaction match the card's most common *prior* value for that field? |
 
-Categorical fields (`ProductCD`, `card_type`, `card_category`, `merchant_category`, `device_type`, `email_domain`) are integer-encoded with index 0 reserved for padding and 1 for unseen/rare categories.
+Plus the engineered/anonymized C1-C14, D1-D15, V1-V339 (numeric, 368 columns) and M1-M9 (categorical) columns. The sequence models and logistic regression see 377 numeric features (9 base + 368 extension, z-scored on the train split, missing values filled with 0) and 15 categorical ones (6 base + 9 extension).
+
+**Gradient-boosted table** (`src/sfraud/features/xgb_features.py`, 497 features). Trees can use much more of the raw data, so XGBoost+ gets its own table built from the same card-level split:
+
+- C/D/V values stay NaN (the missingness pattern is informative and XGBoost handles NaN), plus per-family missing-value counts;
+- extra raw columns: `card1/2/3/5`, `addr1/2`, `dist1/2`, `R_emaildomain`, `id_01..id_38`;
+- frequency encodings and frequency-ranked categorical codes computed on **train rows only**;
+- **20 history-derived features**, all causal: log-time-since-previous, `amt_dev`, `amt_zscore`, the transaction's position in the card's history, the `stab_*` flags, plus prior-transaction mean/std/max amount, time since the card's first transaction, rolling 1h/1d/7d transaction counts and 1d spend, and "changed since the previous transaction" flags. These were verified against a brute-force reference and by a perturbation test (changing a later transaction changes no earlier row's features).
 
 ### 3.2 Sequence construction (`src/sfraud/data/sequences.py`)
 
-- Transactions are grouped by `card_id`, sorted chronologically, then **right-padded**: real transactions occupy positions `0..len-1`, padding fills the rest. Sequence position therefore equals "number of transactions seen so far" (`N = position + 1`), which is what the accuracy-vs-N analysis in Section 6 needs. A card with more than 30 transactions is truncated to its *first* 30 (so "position N" means the same thing for every card).
-- **Split:** cards (not rows) are ordered by each card's first transaction time and cut into contiguous 70/15/15 train/val/test blocks. No card's rows are split across sets, and train broadly precedes val/test in time -- satisfying "split by user/time, not randomly per-row" in one pass.
-- Numeric features are standardized using statistics fit on the **train** split only.
-- Output: `sequences_{train,val,test}.npz` (padded tensors, for the LSTM/Transformer/PyTorch `Dataset`) and `features_flat.parquet` (the same engineered features, unpadded, for the tabular baselines) -- both share the identical card membership per split, so every model in this report is compared on the same held-out cards.
+- Transactions are grouped by `card_id`, sorted chronologically, and **right-padded** to length 30; a card with more than 30 transactions is truncated to its *first* 30. This drops 35,531 of the 590,540 transactions (6.0%) -- those beyond the 30th position of cards with more than 30 transactions -- from the sequence models. The tabular models are trained on all rows.
+- **Split:** cards (not rows) are ordered by first-transaction time and cut into contiguous 70/15/15 train/val/test blocks. No card spans two splits and train broadly precedes val/test in time:
+
+| Split | Cards | Transactions (sequences) | Fraud rate |
+|---|---|---|---|
+| train | 113,017 | 425,401 | 3.05% |
+| val | 24,218 | 69,426 | 4.97% |
+| test | 24,218 | 60,182 | 4.54% |
+
+The fraud rate rises from train to val/test, so the evaluation includes some temporal distribution shift.
 
 ### 3.3 Models
 
 | Model | File | Role |
 |---|---|---|
 | Logistic Regression | `models/baseline.py` | simplest baseline |
-| XGBoost | `models/baseline.py` | classical single-transaction baseline (our floor to beat) |
-| **LSTM** | `models/lstm.py` | main sequence model; outputs a fraud probability at **every** step (many-to-many), trained with weighted BCE |
-| **Transformer** (stretch goal) | `models/transformer.py` | hand-rolled causal self-attention encoder (built from scratch rather than `nn.TransformerEncoder` so attention weights can be recovered for Plot 4) |
-| Autoencoder | `models/autoencoder.py` | anomaly head for fault detection (Section 3.4) |
+| XGBoost (original baseline) | `models/baseline.py` | single-transaction baseline on the shared features |
+| **XGBoost+** | `training/train_xgb_plus.py` | XGBoost on the 497-feature table, early stopping and a small grid scored on validation PR-AUC (picked depth 6, column sample 0.4; stopped at 558 trees) |
+| XGBoost+ (no history) | `training/train_xgb_plus.py` | the same model and hyperparameters with all 20 history-derived features removed -- the fair test of whether history helps |
+| LSTM | `models/lstm.py` | sequence model; outputs a fraud probability at every step, focal loss, 210,449 parameters |
+| Transformer | `models/transformer.py` | hand-rolled causal self-attention encoder, focal loss, 108,817 parameters |
+| Autoencoder | `models/autoencoder.py` | per-transaction anomaly head for fault detection (Section 3.4) |
+| Blend | `evaluation/blend.py` | 0.85 XGBoost+ + 0.15 LSTM after Platt calibration on validation; weight chosen on validation PR-AUC |
 
-The LSTM and Transformer both consume the same per-step input: numeric features concatenated with learned embeddings of the categorical fields (`models/layers.py`). Both are strictly causal (the Transformer via a triangular attention mask), so a prediction at position *t* never sees transactions *t*+1 onward -- verified directly in `tests/test_models.py::test_transformer_is_causal`.
+Both neural sequence models are strictly causal (the Transformer via a triangular attention mask), verified in `tests/test_models.py`. They were trained for a fixed 15 epochs with the default hyperparameters and **were not tuned**.
 
-### 3.4 Fault vs. fraud design (Section 3 of the blueprint)
+### 3.4 Fault vs. fraud design
 
-Two independent scores are combined per transaction:
-
-- **Fraud probability** -- the LSTM's supervised output.
-- **Anomaly score** -- reconstruction loss from `TransactionAutoencoder`, trained **only on normal (`isFraud==0`) transactions**. It reconstructs the numeric features (MSE) and *classifies* each categorical field back out (cross-entropy against the true category), so a categorical surprise -- a new device, a switched email domain -- is penalized the same way a numeric surprise is. This is trained on the same causally-personalized feature set as everything else (Section 3.1), so "anomalous" is relative to a user's own history, not just the population.
+Two independent scores are combined per transaction: the LSTM's fraud probability, and an autoencoder anomaly score (reconstruction loss of a model trained only on `isFraud==0` rows, relative to the 90th percentile of normal rows' scores).
 
 | Fraud probability | Anomaly score | Category |
 |---|---|---|
@@ -73,79 +92,120 @@ Two independent scores are combined per transaction:
 | High | High | **Fraud** |
 | High | Low | Edge case (flagged for manual review) |
 
-"High" anomaly is relative to the 90th percentile of *normal* transactions' scores in the held-out set, not an arbitrary global cutoff (`configs/config.yaml: fault_fraud.anomaly_score_percentile`).
+"High" fraud probability uses a threshold **chosen on the validation split** (the F1-optimal one, 0.2649 for the LSTM) instead of a fixed 0.5.
 
-## 4. Benchmark comparison (Section 2 targets)
+## 4. Model comparison
 
-All models evaluated on the same held-out **test** split (4,607-4,825 transactions depending on truncation, ~6.8-6.9% fraud in this split):
+Every model is scored on the **same 60,182 test transactions (2,731 fraud)**. The sequence models only cover each card's first 30 transactions, so scoring every model on the intersection is the like-for-like comparison.
 
-| Model | AUC-ROC | PR-AUC | Precision | Recall |
-|---|---|---|---|---|
-| Random baseline (reference) | ~0.50 | -- | -- | -- |
-| Logistic Regression | 0.9841 | 0.8957 | 0.606 | 0.912 |
-| XGBoost | 0.9886 | 0.9274 | 0.771 | 0.876 |
-| **LSTM** | **0.9947** | **0.9612** | 0.798 | 0.939 |
-| Transformer | 0.9910 | 0.9429 | 0.708 | 0.933 |
-| Published strong baseline (reference) | 0.90-0.93 | -- | -- | -- |
-| Kaggle winning solutions (reference ceiling) | ~0.945-0.950 | -- | -- | -- |
+| Model | Test AUC-ROC | Test PR-AUC |
+|---|---|---|
+| Logistic Regression | 0.8487 | 0.3975 |
+| XGBoost (original baseline) | 0.8837 | 0.5376 |
+| XGBoost+ (no history features) | 0.8930 | **0.5668** |
+| **XGBoost+ (with history features)** | **0.8956** | 0.5580 |
+| LSTM | 0.8528 | 0.4744 |
+| Transformer | 0.8502 | 0.4711 |
+| Blend (0.85 XGBoost+ + 0.15 LSTM) | 0.8957 | 0.5604 |
 
-![Benchmark comparison](figures/plot5_benchmark_comparison.png)
+(Scored on each model's own test rows in the earlier phases: XGBoost 0.8792 / 0.5287, XGBoost+ 0.8938 / 0.5519, XGBoost+ without history 0.8926 / 0.5606, LogReg 0.8452 / 0.3961 -- the sequence models' numbers are identical.)
 
-Both sequence models beat the XGBoost floor, which is the headline claim the blueprint asks for ("prove the sequence model adds value over classical ML"). All numbers here sit above the published reference range because our synthetic fraud is constructed with a clear, learnable signal (see the caveat at the top of this report) -- the point of this run is to demonstrate that the pipeline, architecture, and evaluation methodology are correct and ready to point at real data, not to claim we beat the Kaggle leaderboard.
+What this shows:
 
-The LSTM comes out ahead of the Transformer here (0.9947 vs. 0.9910 AUC-ROC); the Transformer does not outperform the simpler recurrent model at this data scale, which is a common finding for smaller sequence-modeling datasets and is reported honestly rather than picked around.
+- **The richer tree model beats the original baseline** by about +0.012 AUC and +0.02 to +0.03 PR-AUC.
+- **The sequence models do not beat the trees.** The LSTM and Transformer are about 0.04 AUC and 0.08-0.09 PR-AUC behind XGBoost+. They beat only logistic regression.
+- **The blend is no better than XGBoost+ alone** (0.8957 vs 0.8956 AUC; the LSTM gets 15% of the weight): the LSTM carries almost nothing the boosted model lacks.
+- The published reference points the project originally set (strong supervised baselines 0.90-0.93 AUC, Kaggle winners about 0.945) were obtained on different splits and with far heavier modelling, so they are **not directly comparable** with these card-level time-split numbers.
+
+**Decision thresholds.** AUC and PR-AUC ignore the threshold, but precision and recall depend on it, and a fixed 0.5 is meaningless across these models: at 0.5 the LSTM has precision 0.88 and recall 0.21, the Transformer 0.85 / 0.24, and the original XGBoost (trained with a 31x positive weight, which inflates its probabilities) precision 0.18 / recall 0.77. Thresholds were therefore chosen on **validation** and applied unchanged to test:
+
+| Model | F1-optimal: precision / recall / F1 | ~70% recall target: precision / recall / F1 |
+|---|---|---|
+| Logistic Regression | 0.380 / 0.443 / 0.409 | 0.184 / 0.674 / 0.289 |
+| XGBoost (original) | 0.545 / 0.501 / 0.522 | 0.248 / 0.699 / 0.366 |
+| XGBoost+ (no history) | 0.613 / 0.497 / 0.549 | 0.290 / 0.696 / 0.410 |
+| XGBoost+ | 0.575 / 0.502 / 0.536 | 0.284 / 0.695 / 0.403 |
+| LSTM | 0.491 / 0.435 / 0.461 | 0.196 / 0.675 / 0.304 |
+| Transformer | 0.415 / 0.474 / 0.443 | 0.188 / 0.671 / 0.293 |
+| Blend | 0.608 / 0.494 / 0.545 | 0.291 / 0.692 / 0.410 |
+
+Validation-chosen recall targets transferred well to test (target 70% gave 0.67-0.70). Operationally, XGBoost+ at its F1-optimal point flags about half the fraud at roughly 58% precision, and pushing to ~70% recall roughly halves the precision (about 0.28).
 
 ## 5. Fault/fraud results
 
-On the held-out val+test transactions (14,419 rows):
+On the held-out val+test transactions (129,608 rows), using the LSTM's validation-chosen fraud threshold (0.2649) and the 90th-percentile anomaly threshold (0.518):
 
 | Quadrant | Count |
 |---|---|
-| Normal | 12,140 |
-| Fault | 1,353 |
-| Edge case | 514 |
-| Fraud | 412 |
+| Normal | 112,750 |
+| Fault | 11,687 |
+| Fraud | 3,397 |
+| Edge case | 1,774 |
 
-![Quadrant scatter](figures/plot3_quadrant_scatter.png)
+32.7% of true fraud lands in the "Fraud" quadrant and 89.1% of true non-fraud lands in "Normal".
 
-**Qualitative validation** (only possible here because the ground truth `synthetic_fault_flag` exists in our synthetic data -- with real data this step is a manual sample review, exactly as the blueprint specifies):
+**There is no ground truth for "fault" on the real data.** The synthetic data had an injected `synthetic_fault_flag`; the real data has none, so the fault-recovery numbers the earlier report quoted do not exist here. What can be measured is the fraud rate inside each quadrant on the test split (derived from the error-analysis breakdown; base rate 4.54%):
 
-- 52.8% of true fraud transactions land in the "Fraud" quadrant (high fraud probability *and* high anomaly).
-- 12.1% of true synthetic faults land in the "Fault" quadrant.
-- 89.7% of true normal transactions land in the "Normal" quadrant.
+| Quadrant (test) | Transactions | Fraud rate |
+|---|---|---|
+| Normal | 52,000 | 2.4% |
+| Fault | 5,762 | 5.0% |
+| Edge case | 873 | 34.0% |
+| Fraud | 1,547 | 57.5% |
 
-The fault recovery rate is deliberately unflattering to report honestly: our injected faults are subtle (a moderate amount increase, sometimes a device/product switch) by design -- if they were trivially detectable they would not be an interesting "hard case" in the first place. This mirrors the blueprint's own framing that fault detection is fundamentally a qualitative exercise rather than one with a clean accuracy number. A concrete, reportable finding from the error analysis (Section 6) that supports this: **61% of the LSTM's false positives on the test set carry `synthetic_fault_flag=1`** -- i.e. well over half of what looks like a fraud-model mistake is actually the model correctly reacting to a genuine behavioral anomaly that our own label convention calls "not fraud." A sample of the highest-scoring "Fault" quadrant transactions is saved to `reports/samples/fault_quadrant_review_sample.csv` for manual inspection.
+The anomaly score carries a modest extra signal -- the Fault quadrant's fraud rate is about twice the Normal quadrant's -- but it is still 95% non-fraud, and **whether those transactions are genuinely benign anomalies is unverified**. A sample of the highest-scoring Fault-quadrant transactions is saved in `reports/samples/fault_quadrant_review_sample.csv`; reviewing it by hand is still to do, and no claim about "fault" correctness should be made until then.
+
+**Autoencoder caveat.** Its validation loss (about 92-149 over training) is roughly 300 times its training loss (0.32-0.57), which suggests some validation rows have extreme values relative to the train-fitted standardization (the heavy-tailed C/D/V columns are z-scored but not clipped). This was not investigated, so the anomaly scores likely partly reflect extreme-value outliers.
 
 ## 6. Analysis
 
-**Accuracy/AUC vs. number of transactions seen** (`reports/figures/plot1_confidence_vs_n.png`, `reports/metrics/confidence_curve.csv`): all four models reach >0.95 AUC-ROC within the first few transactions on this synthetic data, because the injected fraud signal (a large amount multiplier) is strong even at low N. The more informative version of "does more history help" shows up in the **stratification by history length** (`reports/metrics/stratify_by_history_length.csv`), which uses the LSTM's full per-transaction AUC within each card-history-length bucket:
+### 6.1 Does card history help?
 
-| History length | Cards | Transactions | Fraud rate | AUC-ROC |
-|---|---|---|---|---|
-| 1-2 | 76 | 109 | 0.0% | -- (no positives) |
-| 3-5 | 109 | 424 | 11.8% | 0.9907 |
-| 6-10 | 91 | 757 | 9.6% | 0.9964 |
-| 11-20 | 109 | 1,595 | 8.2% | 0.9937 |
-| 21+ | 65 | 1,722 | 3.4% | 0.9983 |
+**Not measurably, in these experiments.** The cleanest test is the ablation -- the same XGBoost+ with and without the 20 history-derived features:
 
-AUC-ROC climbs from 0.991 (3-5 transactions of history) to 0.998 (21+) with a small dip at 11-20 -- overall a clear improving trend, direct evidence that the sequence model benefits from more history rather than relying purely on per-transaction features, consistent with the blueprint's hypothesis.
+| | Test AUC-ROC | Test PR-AUC | Val PR-AUC |
+|---|---|---|---|
+| With history | 0.8956 | 0.5580 | 0.6104 |
+| Without history | 0.8930 | 0.5668 | 0.6165 |
 
-**Per-user prediction traces** (`reports/figures/plot2_prediction_traces.png`): a fraud case shows a clean probability spike exactly at the injected account-takeover point that decays a few transactions after the burst ends; a fault case stays well under the 0.5 decision threshold despite a visible bump, correctly *not* being confused with fraud; a normal case stays flat near zero throughout.
+History is +0.003 AUC but -0.009 PR-AUC on test, and the no-history model is also slightly better on validation PR-AUC. Treat this as no benefit; the improvement over the original XGBoost came from the richer raw features, NaN handling and tuning.
 
-**Attention heatmap** (`reports/figures/plot4_attention_heatmap.png`): for the same fraud-case card, the Transformer's last-layer attention shows a sharp peak where each fraudulent-burst prediction attends back to the **first fraudulent transaction in the burst** -- a directly interpretable, and correct, story for "which past transaction drove this prediction."
+**AUC by how much history was available** (test, AUC-ROC; "n_seen" = the transaction's position in its card's history; full table, including PR-AUC and all models, in `reports/metrics/by_history_length_common.csv`):
 
-**Error analysis** (`reports/metrics/error_analysis.json`): false positives (74 on the test set) skew toward `synthetic_fault_flag=1` (60.8%, discussed above) and toward mid-history transactions (mean N≈10.9); false negatives are rarer (19) and skew earlier in a card's history (mean N≈5.5), consistent with fraud being harder to catch before a clear behavioral baseline has formed. Notably, none of the false negatives are synthetic faults (0%), and 8 of the 19 land in the Phase 5 "Fault" quadrant -- i.e. even when the fraud head misses them, the independent anomaly score still flags something unusual about them.
+| n_seen | Transactions | Fraud | XGBoost+ | XGBoost+ (no history) | LSTM | Blend |
+|---|---|---|---|---|---|---|
+| 1-2 | 33,578 | 1,289 | 0.912 | 0.912 | 0.871 | 0.911 |
+| 3-5 | 12,496 | 662 | 0.880 | 0.876 | 0.835 | 0.881 |
+| 6-10 | 7,529 | 422 | 0.875 | 0.866 | 0.836 | 0.875 |
+| 11-20 | 5,047 | 286 | 0.861 | 0.855 | 0.814 | 0.860 |
+| 21+ | 1,532 | 72 | 0.837 | 0.840 | 0.790 | 0.841 |
 
-**Bonus -- t-SNE of learned categorical embeddings** (`reports/figures/plot7_embedding_tsne.png`): projecting only the concatenated categorical-embedding vectors (no amount/time information) shows partial, not clean, clustering of fraud/fault vs. normal. This is expected and informative: it indicates categorical identity alone carries some signal, but most of the LSTM's discriminative power comes from the amount/time deviation features layered on top, consistent with `amt_dev`/`amt_zscore` being causal, personalized features rather than raw categorical identity.
+AUC **falls** as history grows, for every model including the one that cannot see history. So this is not evidence about history's usefulness; the longer-history transactions come from a different (and harder) population, and the last bucket has only 72 fraud cases. The LSTM-only stratification by a card's total history length shows the same non-improving pattern (AUC 0.892, 0.850, 0.808, 0.839, 0.825 for 1-2, 3-5, 6-10, 11-20, 21+ transactions). The earlier synthetic result -- AUC climbing with history -- was a property of the synthetic generator.
+
+### 6.2 Error analysis (LSTM, test, validation-chosen threshold 0.2649)
+
+True positives 1,187, false positives 1,233, false negatives 1,544, true negatives 56,218 (precision 0.49, recall 0.43).
+
+- False negatives (missed fraud) occur earlier in a card's history (mean position 5.0) than false positives (6.9); 1,255 of the 1,544 sit in the Normal quadrant and 289 in the Fault quadrant.
+- False positives split 657 into the Fraud quadrant and 576 into Edge case.
+- Missed fraud and false alarms both have higher mean amounts (about $187-188) than correctly caught fraud (about $127).
+
+### 6.3 Training behaviour and calibration
+
+- LSTM and Transformer validation metrics are noisy from epoch to epoch (LSTM val AUC 0.857-0.875, PR-AUC 0.46-0.51) with training loss still falling slowly, so they are neither clearly converged nor stable. With a fixed 15 epochs and default hyperparameters, their gap to XGBoost+ may partly reflect that; it was not tested.
+- Models are not calibrated to a common scale: the F1-optimal threshold is 0.22 for XGBoost+, 0.26 for the LSTM, and 0.83 for the original XGBoost (inflated by its positive-class weight). The blend therefore calibrates each model on validation first.
+- Validation scores are optimistic relative to test (XGBoost+ PR-AUC 0.61 on validation vs 0.56 on test) because validation was used for early stopping, the hyperparameter grid, calibration and thresholds, and because the fraud rate shifts over time.
 
 ## 7. Limitations
 
-- **Synthetic data caveat (the big one):** every number above is on synthetic stand-in data with a constructed fraud signal. The pipeline is written to consume the real Kaggle CSVs unmodified (drop them in `data/raw/`, see README) but that has not been run in this environment.
-- **`merchant_category`** does not exist in the real IEEE-CIS schema; it is derived deterministically from `ProductCD` (`data/merge.py: PRODUCT_TO_MERCHANT_CATEGORY`), documented as a modeling choice rather than a real merchant taxonomy.
-- **`card_id`** for real data is a heuristic (`card1, card2, card3, card5` plus the account start day `floor(TransactionDT/86400 - D1)`), since IEEE-CIS has no explicit user identifier. It is an approximation, not a guaranteed 1:1 mapping to a physical card or person. See `_derive_card_id`'s docstring in `src/sfraud/data/merge.py` for the comparison of candidate keys on the real data.
-- **Autoencoder anomaly score is per-transaction, not per-sequence:** it does not have its own recurrent state, so it cannot detect anomalies that only show up as a *pattern across several transactions* rather than a single-transaction deviation. This was a deliberate choice to avoid a same-step LSTM-autoencoder's trivial-reconstruction problem (see the module docstring in `models/autoencoder.py`), but it means the fault/fraud quadrant logic is only as good as the per-row features feeding it.
-- **Fault recovery rate (12.1%) is modest** at the current anomaly-score threshold (90th percentile of normal). Lowering the threshold would trade recall for more false "Fault" flags on genuinely normal transactions; we did not sweep this trade-off exhaustively (Plot 3 gives the reader the underlying distribution to judge it visually).
-- **Transformer did not outperform the LSTM** on this dataset/scale, contrary to a common expectation; reported as-is rather than tuned until it "won."
+- **No confidence intervals.** Test fraud counts are modest (2,731 overall, 72 in the largest-history bucket). The differences between XGBoost+ with and without history, and between the blend and XGBoost+, are small enough (at most 0.003 AUC) that they are probably noise; a bootstrap over cards would confirm this and has not been run.
+- **`card_id` is an approximation.** At least half of derived cards have a single transaction, 12,286 rows are isolated because a key field is missing, and the largest derived card has 1,414 transactions (probably several accounts opened the same day in one card bucket). History features and sequence models are only as good as this grouping.
+- **The sequence models are untuned and use only the first 30 transactions per card.** The negative result for them is for these hyperparameters and this card grouping, not a proof that sequence models cannot help on this data.
+- **"Fault" has no ground truth** and its quadrant has not been manually reviewed (Section 5). The anomaly score is per-transaction (a deliberate design choice, see `models/autoencoder.py`), so it cannot detect anomalies that only appear as a pattern across several transactions, and its validation loss suggests extreme-value outliers (Section 5).
+- **Temporal shift:** the fraud rate is 3.05% in train and 4.5-5.0% in val/test; thresholds chosen on validation transfer reasonably (recall targets landed close to target) but are not guaranteed to on future data.
+- **`merchant_category`** does not exist in the real schema; it is derived deterministically from `ProductCD` (`data/merge.py: PRODUCT_TO_MERCHANT_CATEGORY`).
+- **Single run, single seed (`seed: 42`)**, CPU-only; no repeated runs.
+- **Committed artifacts are stale** until the real-run figures/metrics/samples are committed (see the note at the top), and `reports/SLIDES.md` still describes the synthetic run.
 
 ## 8. Reproducibility
 
@@ -155,4 +215,4 @@ pip install -e .
 bash scripts/run_pipeline.sh
 ```
 
-Every stage reads its parameters from `configs/config.yaml` and writes to `reports/figures/`, `reports/metrics/`, and `checkpoints/`. `seed: 42` is set once and threaded through numpy/random/torch (`src/sfraud/utils/seed.py`). See [README.md](../README.md) for the full phase-by-phase breakdown and how to plug in the real Kaggle dataset.
+Every stage reads its parameters from `configs/config.yaml` and writes to `reports/figures/`, `reports/metrics/`, and `checkpoints/`. `seed: 42` is set once and threaded through numpy/random/torch (`src/sfraud/utils/seed.py`). The real-data run used a Kaggle notebook: the competition data attached as an input (`/kaggle/input/competitions/ieee-fraud-detection/`), `train_transaction.csv` and `train_identity.csv` linked into `data/raw/`, then Phases 1, 2, 3, 3b, 4, 5, 6, 6b and 7 in order (Phase 0, the Kaggle API download, is not needed inside Kaggle). Phase 3b is slow on CPU (a four-model grid plus two final fits); `xgboost_plus.search.enabled: false` in the config skips the grid. See [README.md](../README.md) for the phase-by-phase breakdown.
