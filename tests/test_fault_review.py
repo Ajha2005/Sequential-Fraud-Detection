@@ -93,3 +93,45 @@ def test_run_refuses_when_there_is_no_fault_quadrant(tmp_path):
     _write_processed(tmp_path, with_fault=False)
     with pytest.raises(ValueError, match="Fault"):
         _run(tmp_path)
+
+
+# ---------------------------------------------------------------- draft labels
+from sfraud.evaluation.fault_review import draft_labels  # noqa: E402
+
+THR = 0.2649
+
+
+def _row(**kw):
+    base = dict(band="50-80%", TransactionID=1, card_id="c", n_seen=6, TransactionAmt=100.0, ProductCD="W", fraud_prob=0.08,
+                anomaly_score=1.0, isFraud=0, max_abs_z=20.0, top1_feature="V100", top1_z=20.0)
+    base.update(kw)
+    return base
+
+
+def _label(rows):
+    df = pd.DataFrame([_row(TransactionID=i + 1, **r) for i, r in enumerate(rows)])
+    return draft_labels(df, THR)
+
+
+def test_draft_label_rules():
+    out = _label([
+        {},                                                   # established card, low prob, anonymised driver -> benign-looking
+        {"isFraud": 1},                                       # labelled fraud
+        {"top1_feature": "amt_zscore", "top1_z": -12.0},      # unusual for this card
+        {"top1_feature": "stab_email_domain", "top1_z": -3.0},
+        {"fraud_prob": 0.24},                                 # within the margin of the threshold
+        {"n_seen": 1},                                        # no history -> unclear
+        {"fraud_prob": 0.18},                                 # mid-probability, not near enough -> unclear
+    ])
+    assert out["reviewer_label"].tolist() == ["benign-looking", "suspicious", "suspicious", "suspicious", "suspicious", "unclear", "unclear"]
+    assert (out["label_source"].str.contains("not ground truth")).all()
+
+
+def test_draft_notes_explain_the_reasons():
+    out = _label([{"n_seen": 1, "fraud_prob": 0.24}, {"top1_feature": "V107", "top1_z": -45.8}, {"top1_feature": "V107", "top1_z": -45.8},
+                  {"max_abs_z": 1.7, "top1_z": 1.7}])
+    notes = out["reviewer_note"].tolist()
+    assert "first transaction on card (no history)" in notes[0] and "just under threshold" in notes[0]
+    assert "0.240" in notes[0] and "0.265" in notes[0]                      # enough precision to tell the two apart
+    assert "same extreme V107 value as 1 other sampled row(s)" in notes[1] and "same extreme V107" in notes[2]
+    assert "no extreme numeric value" in notes[3]

@@ -91,6 +91,7 @@ python3 scripts/phase6_evaluate.py           # Phase 6: benchmark comparison, ac
 python3 scripts/phase6b_blend_thresholds.py  # Phase 6b: same-rows comparison, validation-chosen blend and thresholds
 python3 scripts/phase7_visualize.py          # Phase 7: all plots
 python3 scripts/review_fault_quadrant.py     # Optional, after Phase 5: characterize the Fault quadrant on real data + a stratified random sample for manual review
+python3 scripts/draft_fault_labels.py        # Optional, after review_fault_quadrant.py: rule-based DRAFT labels for the sampled Fault rows (not ground truth)
 python3 scripts/bootstrap_differences.py     # Optional, after Phase 6b: bootstrap 95% CIs (resampling test cards) for model differences
 ```
 
@@ -146,7 +147,7 @@ What this does and doesn't show:
 
 - **Sequence models do not beat boosted trees on this data.** The LSTM is about 0.04 AUC behind XGBoost+, and a blend with the LSTM adds essentially nothing (0.8957 vs 0.8956 AUC). (On the earlier synthetic data the LSTM was best -- that was a property of the synthetic generator, not of real fraud.)
 - **Card history did not help the boosted model.** XGBoost+ with history is +0.003 AUC (bootstrap 95% CI -0.001 to +0.006, includes zero) and -0.009 PR-AUC (CI -0.016 to -0.002, excludes zero) versus the same model without it: no gain, and slightly worse on PR-AUC. The gain over the original XGBoost (+0.012 AUC, CI +0.007 to +0.017; +0.020 PR-AUC, CI +0.008 to +0.030) is real and came from richer raw features, NaN handling and tuning, not from history. The blend with the LSTM adds nothing (both intervals include zero), and the LSTM is clearly worse than XGBoost+ (-0.043 AUC, CI -0.051 to -0.034). The intervals cover test-sampling noise only (models are not retrained).
-- **The Fault quadrant mostly reflects extreme feature values.** Over all 11,687 Fault rows, 96.5% have a feature beyond 5 standard deviations (Normal rows: 17.5%) and two-thirds beyond 10. Its fraud rate is 6.1% vs 2.5% for Normal, but the highest-scoring rows are almost all non-fraud outliers. Whether they are benign "faults" is not established (no ground truth).
+- **The Fault quadrant mostly reflects extreme feature values.** Over all 11,687 Fault rows, 96.5% have a feature beyond 5 standard deviations (Normal rows: 17.5%) and two-thirds beyond 10. Its fraud rate is 6.1% vs 2.5% for Normal, but the highest-scoring rows are almost all non-fraud outliers. In a 60-row stratified sample only 1 row was unusual for its own card (the rest are unusual in anonymised V/D/C columns, with one extreme V pattern recurring on six different cards). Whether they are benign "faults" is not established (no ground truth).
 - **Thresholds matter.** At a fixed 0.5 the LSTM catches only ~21% of fraud. With a threshold chosen on validation (F1-optimal), XGBoost+ reaches test precision 0.58 / recall 0.50 (F1 0.54); asking for ~70% recall costs precision (~0.28).
 - **Card identity is approximate.** IEEE-CIS has no user id; of the 161,453 derived cards at least half have a single transaction (median history 1, mean 3.7), which limits what any sequence model can learn.
 
@@ -173,4 +174,5 @@ What this does and doesn't show:
 - [x] Real-run figures, metrics and samples committed under `reports/`
 - [x] Bootstrap confidence intervals for the model differences (`scripts/bootstrap_differences.py`)
 - [x] Characterize the Fault quadrant over all its rows (`scripts/review_fault_quadrant.py`)
-- [ ] Manually label the 60-row stratified Fault sample drawn in the notebook (not yet reviewed; there is no ground truth for "fault" on real data)
+- [x] Review the 60-row stratified Fault sample (`reports/samples/fault_review_sample.csv`): a rule-based draft reading is recorded (22 benign-looking / 6 suspicious / 32 unclear) -- heuristics over the available fields, not ground truth
+- [ ] A person confirms or overrides the draft labels (there is no ground truth for "fault" on real data)

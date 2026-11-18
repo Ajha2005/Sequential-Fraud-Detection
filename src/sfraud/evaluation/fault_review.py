@@ -15,6 +15,11 @@ things that do not need a label:
      `reviewer_label` / `reviewer_note` columns for a manual look.
 
 It cannot prove the Fault quadrant is benign; it characterizes it.
+
+`draft_labels` adds a rule-based DRAFT reading of the sampled rows (benign-looking
+/ suspicious / unclear) so a reviewer has a starting point. The labels are
+heuristics over the fields available -- they are not ground truth and are meant
+to be confirmed or overridden by a person.
 """
 
 from __future__ import annotations
@@ -60,6 +65,52 @@ def assign_bands(scores: pd.Series) -> pd.Series:
     (rank-based, so ties cannot make the band edges collide)."""
     pct = scores.rank(pct=True, method="first")
     return pd.cut(pct, bins=BAND_EDGES, labels=BAND_LABELS, include_lowest=True)
+
+
+# Behavioural features: if one of these is the top-driving feature, the row is unusual *for its card*.
+BEHAVIOURAL_PREFIXES = ("amt_", "log_amt", "log_time_delta", "stab_", "txn_")
+NEAR_THRESHOLD_MARGIN = 0.035  # "just under the fraud threshold" = within this margin of it
+
+
+def draft_labels(sample: pd.DataFrame, fraud_threshold: float) -> pd.DataFrame:
+    """Rule-based DRAFT labels for a sampled set of Fault rows. Heuristics, not ground truth.
+
+    suspicious      labelled fraud; OR the top-driving feature is behavioural (unusual amount /
+                    timing / category for this card); OR the fraud probability is within
+                    NEAR_THRESHOLD_MARGIN of the fraud threshold (a near-miss of the fraud model).
+    benign-looking  not suspicious, AND an established card (n_seen >= 4), AND a low fraud
+                    probability (< 0.15), AND the extremeness sits only in anonymised columns.
+                    Means "no red flag in the available fields", NOT "verified benign".
+    unclear         everything else (notably first/second transactions, which have no history).
+    """
+    out = sample.copy()
+    sig = out.groupby(["top1_feature", "top1_z"])["TransactionID"].transform("size")
+    behavioural = out["top1_feature"].astype(str).str.startswith(BEHAVIOURAL_PREFIXES)
+    near = out["fraud_prob"] >= fraud_threshold - NEAR_THRESHOLD_MARGIN
+    suspicious = (out["isFraud"] == 1) | behavioural | near
+    benign = (~suspicious) & (out["n_seen"] >= 4) & (out["fraud_prob"] < 0.15)
+    out["reviewer_label"] = np.where(suspicious, "suspicious", np.where(benign, "benign-looking", "unclear"))
+
+    notes = []
+    for i, r in out.iterrows():
+        parts = [f"{r['ProductCD']}, ${r['TransactionAmt']:,.2f}".replace(".00", ""), f"n_seen {int(r['n_seen'])}",
+                 f"driver {r['top1_feature']} (z {r['top1_z']})"]
+        if sig.loc[i] > 1:
+            parts.append(f"same extreme {r['top1_feature']} value as {int(sig.loc[i]) - 1} other sampled row(s)")
+        if r["isFraud"] == 1:
+            parts.append("labelled fraud")
+        if behavioural.loc[i]:
+            parts.append("behavioural driver (unusual for this card)")
+        if near.loc[i]:
+            parts.append(f"fraud prob {r['fraud_prob']:.3f} just under threshold {fraud_threshold:.3f}")
+        if int(r["n_seen"]) == 1:
+            parts.append("first transaction on card (no history)")
+        if r["max_abs_z"] < 3:
+            parts.append("no extreme numeric value (score likely from categorical fields)")
+        notes.append("; ".join(parts))
+    out["reviewer_note"] = notes
+    out["label_source"] = "draft (rule-based; not ground truth)"
+    return out
 
 
 def run(

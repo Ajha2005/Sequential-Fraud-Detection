@@ -46,6 +46,7 @@ Does Transaction History Help Detect Fraud? A Like-for-Like Evaluation of Sequen
 - 2x2: LSTM fraud probability x autoencoder anomaly score. Test fraud rate by quadrant: Normal 2.4%, **Fault 5.0%**, Edge case 34%, Fraud 57.5% (base rate 4.5%).
 - Be explicit: **no ground truth for "fault"**; the Fault quadrant is ~94% non-fraud and is **not validated as benign**.
 - Measured over all 11,687 Fault rows: **96.5% have a feature beyond 5 standard deviations** (Normal rows: 17.5%); two-thirds beyond 10. The anomaly score mostly measures *extreme anonymised feature values*. Fraud rate 6.1% vs 2.5% (Normal), but flat across score bands and only 1.7% in the top 1% -- the most extreme rows are almost all non-fraud outliers.
+- A 60-row stratified sample: only **1 of 60** rows is unusual for *its own card*; the rest are unusual in anonymised V/D/C columns, and one extreme V pattern recurs on **six different cards**. 22 of 60 are a card's first or second transaction (no history). The rule-based draft labels (22 benign-looking / 6 suspicious / 32 unclear) are heuristics, not ground truth.
 
 ### 9. Interpretability plots (honest)
 - `plot2_prediction_traces.png`: the fault panel is empty on real data, and the example fraud only reaches ~0.24 probability.
@@ -60,7 +61,7 @@ Does Transaction History Help Detect Fraud? A Like-for-Like Evaluation of Sequen
 ### 11. Next steps
 - Tune the deep models; clip heavy-tailed features (then re-test the anomaly score); repeat runs over several seeds.
 - Causal aggregates across other entities (`card1`, `addr1`, email domain), not just same-card history.
-- Manually label the 60-row stratified Fault sample (drawn, not yet reviewed).
+- A person confirms or overrides the rule-based draft labels of the 60-row stratified Fault sample (22 benign-looking / 6 suspicious / 32 unclear -- heuristics, not ground truth).
 
 ### 12. Team & deliverables checklist
 - Member A: data pipeline, sequence construction, baselines.
